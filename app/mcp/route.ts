@@ -52,7 +52,7 @@ const TOOLS = [
   {
     name: "save_market_brief",
     description:
-      `Part of the routine, after reading the accounts: send X Alpha a brief on how crypto looks right now. Search X and the news for the last 24 to 48 hours yourself: what the most-followed crypto voices are saying, and the biggest stories (ETF flows, regulation, hacks, listings, macro). X Alpha shows it at the top of the dashboard. Each run replaces the last brief.`,
+      `Part of the routine, after reading the accounts: send X Alpha a brief on how crypto looks right now. Search X and the news for the last 24 to 48 hours yourself: what the most-followed crypto voices are saying, and the biggest stories (ETF flows, regulation, hacks, listings, macro), and 2 to 4 accounts worth adding. X Alpha shows it on the dashboard. Each run replaces the last brief.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -91,6 +91,22 @@ const TOOLS = [
               tokens: { type: "array", items: { type: "string", enum: [...TOKENS] }, description: "Coins it is mainly about, if any." },
             },
             required: ["title", "summary", "impact"], additionalProperties: false,
+          },
+        },
+        suggested_accounts: {
+          type: "array", maxItems: 6,
+          description: "2 to 4 X accounts worth adding to X Alpha that it isn't following yet: people making clear, specific calls on the coins it tracks (named price levels, a clear side), not news bots.",
+          items: {
+            type: "object",
+            properties: {
+              handle: { type: "string", description: "X username, like @example." },
+              name: { type: "string", description: "Display name." },
+              profile_image_url: { type: "string", description: "Profile picture URL from X (https://pbs.twimg.com/...)." },
+              followers: { type: "string", description: "Follower count, short, like 1.2M." },
+              why: { type: "string", description: "One sentence on why they're worth following, from what they posted this week." },
+              tokens: { type: "array", items: { type: "string", enum: [...TOKENS] }, description: "Coins they mostly call." },
+            },
+            required: ["handle", "why"], additionalProperties: false,
           },
         },
       },
@@ -193,7 +209,7 @@ async function callTool(name: string, args: Record<string, unknown>, ctx: { canW
   if (name === "save_market_brief") {
     if (!ctx.canWrite) throw new Error("This server needs its key to save. Reconnect using the MCP address that ends in ?key=...");
     const b = await saveBrief(cleanBrief(args));
-    return { saved: true, saved_at: b.savedAt, coins: b.coins.length, voices: b.voices.length, news: b.news.length, dashboard: ctx.origin };
+    return { saved: true, saved_at: b.savedAt, coins: b.coins.length, voices: b.voices.length, news: b.news.length, suggested_accounts: b.suggested?.length ?? 0, dashboard: ctx.origin };
   }
   if (name === "get_market_brief") return (await getBrief()) ?? { message: "No brief saved yet. Use save_market_brief." };
   if (name === "get_account_reading") {

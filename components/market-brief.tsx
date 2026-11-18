@@ -12,8 +12,9 @@ import { HoverCard, HoverCardProfile } from "@/components/arc/hover-card/hover-c
 import { Sparkline } from "@/components/arc/sparkline/sparkline";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { card, label, neutralAccent, signed } from "@/components/shared";
-import type { BriefVoice, MarketBrief, Mood } from "@/lib/brief";
-import { TOKEN_NAMES, TOKENS, type TokenSymbol } from "@/lib/stance";
+import { promptFor, routinePrompt } from "@/components/grok-prompts";
+import type { BriefVoice, MarketBrief, Mood, SuggestedAccount } from "@/lib/brief";
+import { TOKENS, type TokenSymbol } from "@/lib/stance";
 import type { PriceSeries } from "@/lib/track";
 
 const HOUR = 3_600_000;
@@ -33,23 +34,18 @@ function MoodChip({ mood, className = "" }: { mood: Mood; className?: string }) 
   );
 }
 
-/** Grok Bot's routine: re-read every saved account, then write the market brief. Pasted into a scheduled Grok task. */
-export function routinePrompt(handles: string[]) {
-  const coins = TOKENS.map((t) => `${t} (${TOKEN_NAMES[t]})`).join(", ");
-  return `Run the X Alpha routine.
-
-1. Accounts${handles.length ? `: ${handles.join(", ")}` : " (any you are asked to follow)"}. For each one, read every post from the last 7 days on X, label each with the token it is about (${coins}, or none), bullish, bearish or neutral, and a strength from 0 to 1, keeping any price levels in the text. Then call save_account_reading once per account with the handle, display name, profile picture URL, a one or two sentence summary and every post.
-
-2. Market brief. Search X and the news for the last 24 to 48 hours: what the most-followed crypto voices are saying and the biggest stories (ETF flows, regulation, hacks, listings, macro). Then call save_market_brief once with:
-- mood (bullish, bearish or mixed), a one-line headline and a 2 to 4 sentence summary
-- coins: for each of ${TOKENS.join(", ")} with something worth saying, its mood and one sentence
-- voices: 3 to 6 top voices, each with handle, name, profile picture URL, followers, their take in their words, mood and a link to the post
-- news: 3 to 6 stories, most important first, each with title, one or two sentence summary, link, source, when it broke, impact (bullish, bearish or mixed) and the coins it is about
-
-Then tell me the overall mood and anything that changed since the last run.`;
-}
-
-export function MarketBriefSection({ prices, handles, now }: { prices: Partial<Record<TokenSymbol, PriceSeries>> | null; handles: string[]; now: number }) {
+export function MarketBriefSection({ prices, handles, now, onSaved }: {
+  prices: Partial<Record<TokenSymbol, PriceSeries>> | null; handles: string[]; now: number;
+  /** Reloads the saved accounts, so one Grok Bot adds after a copied prompt shows up in Recent Profiles. */
+  onSaved: () => void;
+}) {
+  // After a suggestion's prompt is copied, check for the new reading every 15s for 10 minutes.
+  const [waitUntil, setWaitUntil] = useState(0);
+  useEffect(() => {
+    if (!waitUntil) return;
+    const id = setInterval(() => { if (Date.now() > waitUntil) { clearInterval(id); setWaitUntil(0); } else onSaved(); }, 15_000);
+    return () => clearInterval(id);
+  }, [waitUntil, onSaved]);
   const [state, setState] = useState<{ status: "loading" } | { status: "ready"; brief: MarketBrief | null } | { status: "error" }>({ status: "loading" });
   useEffect(() => {
     let live = true;
@@ -165,7 +161,52 @@ export function MarketBriefSection({ prices, handles, now }: { prices: Partial<R
           </ol>
         </div>
       </div>
+
+      {/* Accounts Grok Bot thinks are worth adding, minus the ones already saved. Copy the prompt to have Grok read one. */}
+      {(() => {
+        const saved = new Set(handles.map((h) => h.toLowerCase()));
+        const fresh = (b.suggested ?? []).filter((a) => !saved.has(a.handle.toLowerCase()));
+        if (!fresh.length) return null;
+        return (
+          <div className="grid gap-2 border-t border-foreground/[0.07] pt-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-sm font-semibold">Accounts to add</h3>
+              <span className="text-xs text-muted-foreground">Copy the prompt and send it to Grok Bot to start tracking them.</span>
+            </div>
+            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {fresh.map((a) => <SuggestionCard key={a.handle} a={a} onCopied={() => setWaitUntil(Date.now() + 10 * 60_000)} />)}
+            </ul>
+          </div>
+        );
+      })()}
     </section>
+  );
+}
+
+function SuggestionCard({ a, onCopied }: { a: SuggestedAccount; onCopied: () => void }) {
+  const account = { handle: a.handle, name: a.name, avatar: a.avatar, bio: "", followers: a.followers ?? "", posts: [], source: "grok" as const };
+  return (
+    <li className="grid content-between gap-3 rounded-lg p-3 ring-1 ring-foreground/[0.08]">
+      <div className="grid gap-2">
+        <a href={`https://x.com/${a.handle.slice(1)}`} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <Avatar account={account} className="size-9 text-xs" />
+          <span className="grid min-w-0 leading-tight">
+            <span className="truncate text-sm font-semibold">{a.name}</span>
+            <span className="truncate text-xs text-muted-foreground">{a.handle}{a.followers ? ` · ${a.followers}` : ""}</span>
+          </span>
+          {a.tokens.length > 0 && (
+            <span className="ml-auto flex shrink-0 -space-x-1">
+              {a.tokens.slice(0, 3).map((t) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={t} src={`/tokens/${t.toLowerCase()}.svg`} alt={t} title={t} className="size-4 rounded-full bg-card ring-2 ring-card" />
+              ))}
+            </span>
+          )}
+        </a>
+        <p className="text-xs leading-relaxed text-muted-foreground text-pretty">{a.why}</p>
+      </div>
+      <CopyButton value={promptFor(a.handle.slice(1))} label="Copy prompt" onCopied={onCopied} />
+    </li>
   );
 }
 

@@ -11,9 +11,12 @@ export type Mood = "bullish" | "bearish" | "mixed";
 export type BriefCoin = { symbol: TokenSymbol; mood: Mood; note: string };
 export type BriefVoice = { handle: string; name: string; avatar?: string; take: string; mood: Mood; url?: string; followers?: string };
 export type BriefNews = { title: string; summary: string; url?: string; source?: string; at?: string; impact: Mood; tokens: TokenSymbol[] };
+export type SuggestedAccount = { handle: string; name: string; avatar?: string; followers?: string; why: string; tokens: TokenSymbol[] };
 export type MarketBrief = {
   savedAt: string; mood: Mood; headline: string; summary: string;
   coins: BriefCoin[]; voices: BriefVoice[]; news: BriefNews[];
+  /** Accounts Grok Bot thinks are worth adding. Older briefs may not have it. */
+  suggested?: SuggestedAccount[];
 };
 
 const LOCAL_FILE = path.join(process.cwd(), ".data", "brief.json");
@@ -34,6 +37,8 @@ const token = (v: unknown, field: string): TokenSymbol => {
   if (!(TOKENS as readonly string[]).includes(t)) throw new Error(`${field} must be one of ${TOKENS.join(", ")}`);
   return t as TokenSymbol;
 };
+const tokens = (v: unknown): TokenSymbol[] =>
+  Array.isArray(v) ? [...new Set(v.map((t) => String(t).toUpperCase()).filter((t) => (TOKENS as readonly string[]).includes(t)))] as TokenSymbol[] : [];
 const link = (v: unknown) => (typeof v === "string" && /^https:\/\/\S+$/.test(v) ? v.slice(0, 500) : undefined);
 const list_ = (v: unknown, field: string, max: number) => {
   if (!Array.isArray(v)) throw new Error(`${field} must be a list`);
@@ -60,7 +65,12 @@ export function cleanBrief(raw: Record<string, unknown>): MarketBrief {
       url: link(n?.url), source: text(n?.source, 60, "", false) || undefined,
       at: n?.at && !Number.isNaN(Date.parse(String(n.at))) ? new Date(String(n.at)).toISOString() : undefined,
       impact: mood(n?.impact, `news[${i}].impact`),
-      tokens: Array.isArray(n?.tokens) ? n.tokens.filter((t: unknown) => (TOKENS as readonly string[]).includes(String(t).toUpperCase())).map((t: unknown) => String(t).toUpperCase() as TokenSymbol) : [],
+      tokens: tokens(n?.tokens),
+    })),
+    suggested: list_(raw.suggested_accounts ?? [], "suggested_accounts", 6).map((a, i) => ({
+      handle: "@" + cleanHandle(a?.handle), name: text(a?.name, 80, "", false) || "@" + cleanHandle(a?.handle),
+      avatar: cleanAvatar(a?.profile_image_url), followers: text(a?.followers, 20, "", false) || undefined,
+      why: text(a?.why, 240, `suggested_accounts[${i}].why`), tokens: tokens(a?.tokens),
     })),
   };
 }
