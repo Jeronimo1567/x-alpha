@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ArrowDownRight, ArrowUpRight, SearchX, X } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, SearchX, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/account-avatar";
 import { GrokBotLogo } from "@/components/brand-logos";
 import { Button } from "@/components/arc/button/button";
@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/arc/checkbox/checkbox";
 import { CopyButton } from "@/components/arc/copy-button/copy-button";
 import { motionTokens } from "@/components/arc/motion-tokens";
 import { EmptyState } from "@/components/arc/empty-state/empty-state";
+import { HoldToConfirm } from "@/components/arc/hold-to-confirm/hold-to-confirm";
 import { SearchField } from "@/components/arc/search-field/search-field";
 import { Sparkline } from "@/components/arc/sparkline/sparkline";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
@@ -47,12 +48,14 @@ export function summarize(account: Account, prices: Prices, now = 0): ProfileSum
 const handleOf = (raw: string) => raw.trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, "").split(/[/?#\s]/)[0].toLowerCase();
 const validHandle = (h: string) => /^[a-z0-9_]{1,15}$/.test(h);
 
-export function Dashboard({ accounts, prices, now, onOpen, onCompare, onSaved }: {
+export function Dashboard({ accounts, prices, now, onOpen, onCompare, onSaved, onRemove }: {
   accounts: Account[]; prices: Prices; now: number;
   onOpen: (handle: string) => void;
   onCompare: (handles: string[]) => void;
   /** A reading arrived (from Grok now, or picked up later from the queue): reload the account list. */
   onSaved: () => void;
+  /** Removes a profile from the list (deletes a saved reading, hides a sample). */
+  onRemove: (handle: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
@@ -92,7 +95,8 @@ export function Dashboard({ accounts, prices, now, onOpen, onCompare, onSaved }:
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {shown.map((s) => (
               <li key={s.account.handle}>
-                <ProfileCard s={s} selected={selected.includes(s.account.handle)} onToggle={(on) => toggle(s.account.handle, on)} onOpen={() => onOpen(s.account.handle)} />
+                <ProfileCard s={s} selected={selected.includes(s.account.handle)} onToggle={(on) => toggle(s.account.handle, on)} onOpen={() => onOpen(s.account.handle)}
+                  onRemove={() => { setSelected((cur) => cur.filter((x) => x !== s.account.handle)); onRemove(s.account.handle); }} />
               </li>
             ))}
           </ul>
@@ -143,9 +147,10 @@ export function LeanSparkline({ s, width = 160, height = 30, interactive = true 
   );
 }
 
-function ProfileCard({ s, selected, onToggle, onOpen }: { s: ProfileSummary; selected: boolean; onToggle: (on: boolean) => void; onOpen: () => void }) {
+function ProfileCard({ s, selected, onToggle, onOpen, onRemove }: { s: ProfileSummary; selected: boolean; onToggle: (on: boolean) => void; onOpen: () => void; onRemove: () => void }) {
   const a = s.account;
   const sample = a.source !== "grok";
+  const [confirming, setConfirming] = useState(false);
   return (
     // minmax(0, 1fr): the chart's one-line headline can't widen the column past the card.
     // The whole card opens the profile; the name button is the keyboard route, and the checkbox only selects.
@@ -159,7 +164,11 @@ function ProfileCard({ s, selected, onToggle, onOpen }: { s: ProfileSummary; sel
             <span className="block truncate text-xs text-muted-foreground">{a.handle}{sample && " · Sample"}</span>
           </span>
         </button>
-        <span onClick={(e) => e.stopPropagation()}>
+        <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <button type="button" aria-label={`Remove ${a.handle}`} title="Remove from Recent Profiles" onClick={() => setConfirming(true)}
+            className="grid size-8 place-items-center rounded-md text-muted-foreground outline-none hover:bg-bad-soft hover:text-bad focus-visible:ring-2 focus-visible:ring-ring">
+            <Trash2 className="size-4" strokeWidth={1.75} />
+          </button>
           <Checkbox aria-label={`Select ${a.handle} to compare`} checked={selected} onCheckedChange={(v) => onToggle(v === true)} />
         </span>
       </div>
@@ -177,6 +186,21 @@ function ProfileCard({ s, selected, onToggle, onOpen }: { s: ProfileSummary; sel
         </p>
       )}
 
+      {/* Remove confirmation: covers the card; holding the button removes it, Cancel or Escape backs out. */}
+      {confirming && (
+        <div role="dialog" aria-label={`Remove ${a.handle}?`} onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => { if (e.key === "Escape") setConfirming(false); }}
+          className="absolute inset-0 z-10 grid cursor-default place-content-center justify-items-center gap-3 bg-card/95 p-4 text-center backdrop-blur-sm"
+          style={{ "--danger": "var(--bad)" } as CSSProperties}>
+          <Avatar account={a} className="size-12 text-base" />
+          <div className="grid gap-1">
+            <p className="font-semibold">Remove {a.handle}?</p>
+            <p className="text-xs text-muted-foreground">{sample ? "Sample profile: hidden on this browser." : "Deletes the saved Grok reading. Research the account again to bring it back."}</p>
+          </div>
+          <HoldToConfirm label="Hold to remove" confirmedLabel="Removed" tone="danger" duration={900} onConfirm={() => setTimeout(onRemove, 450)} autoFocus />
+          <button type="button" onClick={() => setConfirming(false)} className="text-xs text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring">Cancel</button>
+        </div>
+      )}
     </article>
   );
 }

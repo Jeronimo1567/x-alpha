@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
-export type BackdropId = "candles" | "depth" | "tape" | "terrain" | "radar" | "braille";
+export type BackdropId = "candles" | "depth" | "tape" | "terrain" | "radar" | "braille" | "rays";
 
 export const BACKDROPS: { id: BackdropId; name: string; align: "center" | "left"; kicker: string }[] = [
   { id: "candles", name: "Candles", align: "center", kicker: "X Alpha · live" },
@@ -13,6 +13,7 @@ export const BACKDROPS: { id: BackdropId; name: string; align: "center" | "left"
   { id: "terrain", name: "Terrain", align: "left", kicker: "// signal ≫ noise" },
   { id: "radar", name: "Radar", align: "left", kicker: "◆ signals locked" },
   { id: "braille", name: "Line", align: "left", kicker: "X Alpha · signals → odds" },
+  { id: "rays", name: "Rays", align: "center", kicker: "X Alpha · face-off" },
 ];
 
 const LH = 12; // line height in px; must match .ascii-art in globals.css
@@ -49,9 +50,25 @@ const fbm = (x: number, seed: number) => (noise(x, seed) * 0.5 + noise(x * 2, se
 type Draw = (R: number, C: number, cw: number, t: number) => Grid;
 
 /** Frames per second per style: enough to look alive, low enough to stay cheap. */
-const FPS: Record<Exclude<BackdropId, "tape">, number> = { candles: 12, depth: 10, terrain: 10, radar: 24, braille: 12 };
+const FPS: Record<Exclude<BackdropId, "tape">, number> = { candles: 12, depth: 10, terrain: 10, radar: 24, braille: 12, rays: 12 };
 
 const draw: Record<Exclude<BackdropId, "tape">, Draw> = {
+  // Only points: dotted lines fanning out from the centre (where a face-off puts its VS) over a faint dot grid,
+  // brighter toward the edges. With animate, the dots drift outward along the lines.
+  rays(R, C, cw, t) {
+    const G = makeGrid(R, C), cx = (C - 1) / 2, cy = (R - 1) / 2, rays = 28, reach = Math.hypot(cx * cw, cy * LH);
+    for (let r = 1; r < R; r += 3) for (let c = 0; c < C; c += 4) put(G, r, c, "·", "d");
+    // Walk out along each ray, a dot every 9px; the start shifts with t so animated dots drift outward.
+    for (let i = 0; i < rays; i++) {
+      const a = (i / rays) * Math.PI * 2 + Math.PI / rays;
+      for (let d = 50 + ((t * 18) % 9); d < reach; d += 9) {
+        const c = Math.round(cx + (Math.cos(a) * d) / cw), r = Math.round(cy + (Math.sin(a) * d) / LH);
+        const f = d / reach;
+        put(G, r, c, "·", f > 0.45 ? "w" : "m");
+      }
+    }
+    return G;
+  },
   // Full-width candlesticks printing in from the right; the newest candle ticks live. The mask clears the middle.
   candles(R, C, _cw, t) {
     const G = makeGrid(R, C), N = Math.ceil(C / 2), speed = 0.8;
@@ -78,33 +95,25 @@ const draw: Record<Exclude<BackdropId, "tape">, Draw> = {
     return G;
   },
 
-  // Bid and ask walls that shift as orders come and go; the text sits in the low spread between them.
+  // Low bid and ask walls that shift as orders come and go, kept subtle: a bright edge over a dim fill, no labels.
   depth(R, C, _cw, t) {
     const G = makeGrid(R, C), mid = Math.floor(C / 2), gap = 4;
-    let bids = 0, asks = 0;
     const side = (dir: 1 | -1, cl: string, seed: number) => {
-      let h = 1, total = 0;
+      let h = 1;
       for (let i = gap; i <= mid + 1; i++) {
         if (i % 3 === 0) {
           const j = i / 3;
-          h = 1 + Math.pow(i / mid, 2.3) * R * 1.15 + (noise(j * 0.7 + t * 0.9, seed) - 0.3) * 3.2 + (hash(Math.floor(t * 3), seed + j) > 0.93 ? 1.5 : 0);
-          total += Math.max(0, h);
+          h = 1 + Math.pow(i / mid, 2.3) * R * 0.5 + (noise(j * 0.7 + t * 0.9, seed) - 0.3) * 2 + (hash(Math.floor(t * 3), seed + j) > 0.93 ? 1 : 0);
         }
         const x = mid + dir * i, hh = Math.max(1, Math.min(R - 1, Math.round(h)));
         for (let r = R - hh; r < R; r++) {
           const d = r - (R - hh);
-          put(G, r, x, d === 0 ? "▀" : d < 2 ? "▓" : d < 5 ? "▒" : "░", d < 2 ? cl : cl + "2");
+          put(G, r, x, d === 0 ? "▀" : d < 2 ? "▒" : "░", d === 0 ? cl : cl + "2");
         }
       }
-      return total;
     };
-    bids = side(-1, "g", 3); asks = side(1, "r", 5);
-    const flow = Math.floor(t * 8);
-    for (let r = 0; r < R; r++) if ((r + flow) % 3 === 0) put(G, r, mid, "┊", "a2");
+    side(-1, "g", 3); side(1, "r", 5);
     for (let c = 0; c < C; c++) if (G[R - 1][c].c === " ") put(G, R - 1, c, "─", "d");
-    write(G, 1, 2, `BIDS ${(bids / 9).toFixed(1)}K`, "g");
-    const ask = `ASKS ${(asks / 9).toFixed(1)}K`;
-    write(G, 1, C - ask.length - 2, ask, "r");
     return G;
   },
 
@@ -188,7 +197,7 @@ const draw: Record<Exclude<BackdropId, "tape">, Draw> = {
 const TAPE = ["BTC>120K", "ETH>5K", "SOL>300", "XRP>3", "FED-CUT-DEC", "RATE-HOLD", "CPI<2.8", "BTC-ATH-Q1", "ETH/BTC>.04", "SOL-ETF", "XRP-ETF", "RECESSION-26", "SPX-7K", "DOGE>1"];
 
 /** Rows of prediction-market tickers drifting in alternating directions. */
-function Tape() {
+function Tape({ still }: { still: boolean }) {
   const rows = useMemo(() => {
     const rand = rng(3);
     return Array.from({ length: 22 }, (_, r) => ({
@@ -199,7 +208,7 @@ function Tape() {
   return (
     <div className="ascii-tape-rows">
       {rows.map((row, i) => (
-        <div key={i} className={`ascii-row${row.rev ? " rev" : ""}`} style={{ animationDuration: `${row.dur}s`, opacity: row.opacity }}>
+        <div key={i} className={`ascii-row${row.rev ? " rev" : ""}`} style={{ animationDuration: `${row.dur}s`, opacity: row.opacity, animationPlayState: still ? "paused" : undefined }}>
           {[0, 1].map((dup) => (
             <span key={dup} aria-hidden={dup === 1}>
               {row.items.map((it, j) => (
@@ -213,7 +222,8 @@ function Tape() {
   );
 }
 
-export function AsciiBackdrop({ id, className = "", style }: { id: BackdropId; className?: string; style?: CSSProperties }) {
+/** `animate={false}` draws a single still frame. */
+export function AsciiBackdrop({ id, animate = true, className = "", style }: { id: BackdropId; animate?: boolean; className?: string; style?: CSSProperties }) {
   const ref = useRef<HTMLPreElement>(null);
   const [size, setSize] = useState<{ R: number; C: number; cw: number } | null>(null);
 
@@ -243,7 +253,7 @@ export function AsciiBackdrop({ id, className = "", style }: { id: BackdropId; c
     if (!el || !size || id === "tape") return;
     const paint = (t: number) => { el.innerHTML = toHtml(draw[id](size.R, size.C, size.cw, t)); };
     paint(0);
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (!animate || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const start = performance.now(), gap = 1000 / FPS[id];
     let raf = 0, last = 0;
     const frame = (now: number) => {
@@ -254,11 +264,11 @@ export function AsciiBackdrop({ id, className = "", style }: { id: BackdropId; c
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [id, size]);
+  }, [id, size, animate]);
 
   return (
     <div aria-hidden="true" className={`ascii-backdrop ascii-${id} ${className}`} style={style}>
-      {id === "tape" ? <Tape /> : null}
+      {id === "tape" ? <Tape still={!animate} /> : null}
       <pre ref={ref} className="ascii-art" />
     </div>
   );
@@ -267,15 +277,16 @@ export function AsciiBackdrop({ id, className = "", style }: { id: BackdropId; c
 const BACKDROP_KEY = "x-alpha-backdrop";
 
 /** Which ASCII style the hero shows, remembered in this browser. Candles until mounted so the prerender matches. */
-export function useBackdrop(): [BackdropId, (id: BackdropId) => void] {
-  const [id, setId] = useState<BackdropId>("candles");
+/** `key` keeps each page's choice separate; `initial` is shown until the saved choice loads. */
+export function useBackdrop(key = BACKDROP_KEY, initial: BackdropId = "candles"): [BackdropId, (id: BackdropId) => void] {
+  const [id, setId] = useState<BackdropId>(initial);
   useEffect(() => {
     let saved: string | null = null;
-    try { saved = localStorage.getItem(BACKDROP_KEY); } catch { /* storage blocked: keep the default */ }
+    try { saved = localStorage.getItem(key); } catch { /* storage blocked: keep the default */ }
     const t = setTimeout(() => { if (BACKDROPS.some((b) => b.id === saved)) setId(saved as BackdropId); }, 0);
     return () => clearTimeout(t);
-  }, []);
-  return [id, (next) => { setId(next); try { localStorage.setItem(BACKDROP_KEY, next); } catch { /* not remembered */ } }];
+  }, [key]);
+  return [id, (next) => { setId(next); try { localStorage.setItem(key, next); } catch { /* not remembered */ } }];
 }
 
 /** Small switcher for a hero's corner, for trying the backdrop styles. Not shown right now; kept for comparing them again. */

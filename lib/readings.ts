@@ -2,7 +2,7 @@
 // On Vercel they live in Vercel Blob. Locally (no blob token) they live in .data/readings.json.
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { list, put } from "@vercel/blob";
+import { del, list, put } from "@vercel/blob";
 import type { Account, Stance } from "./sample";
 import { TOKENS, type TokenSymbol } from "./stance";
 
@@ -83,6 +83,21 @@ export async function saveReading(input: { handle: string; name: string; summary
     await fs.writeFile(LOCAL_FILE, JSON.stringify(all, null, 2));
   }
   return reading;
+}
+
+/** Deletes an account's saved reading. Returns false if there was none. */
+export async function deleteReading(handle: string): Promise<boolean> {
+  if (useBlob()) {
+    const { blobs } = await list({ prefix: `readings/${handle}.json` });
+    if (blobs.length === 0) return false;
+    await del(blobs.map((b) => b.url));
+    return true;
+  }
+  const all = await readLocal();
+  if (!all[handle]) return false;
+  delete all[handle];
+  await fs.writeFile(LOCAL_FILE, JSON.stringify(all, null, 2));
+  return true;
 }
 
 /** Shapes a saved reading like the accounts the dashboard and scoring already use. */

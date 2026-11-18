@@ -12,6 +12,7 @@ import { Confidence } from "@/components/confidence";
 import { Market } from "@/components/market";
 import { PriceCallsChart } from "@/components/price-calls-chart";
 import { since, SourceStatus } from "@/components/source-status";
+import { SiteFooter } from "@/components/site-footer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { XAlphaLogo } from "@/components/x-alpha-logo";
 import { DAY_MS, OddsState, Tag, card, cents, clock, date, geminiUrl, label, neutralAccent, pct, sideOf, signed, stamp, usd, useOdds, when, displayName } from "@/components/shared";
@@ -22,6 +23,8 @@ import { bestContract, type Pick, type PickResult } from "@/lib/pick";
 import { ACCOUNTS, type Account, type Stance } from "@/lib/sample";
 import { stances, TOKEN_NAMES, type TokenStance, type TokenSymbol } from "@/lib/stance";
 import { HORIZON_DAYS, trackRecord, type Call, type PriceSeries, type Tally, type TokenRecord } from "@/lib/track";
+
+const HIDDEN_KEY = "x-alpha-hidden-samples";
 
 export default function Page() {
   // Accounts Grok Bot has sent in come first; the invented samples stay as a fallback.
@@ -55,7 +58,31 @@ export default function Page() {
   const [picked, setPicked] = useState<TokenSymbol | null>(null);
   const [ladderIndex, setLadderIndex] = useState<number | null>(null);
 
-  const accounts = [...fromGrok, ...ACCOUNTS];
+  // Sample accounts live in code, so "removing" one hides it in this browser. Saved readings are deleted for real.
+  const [hiddenSamples, setHiddenSamples] = useState<string[]>([]);
+  useEffect(() => {
+    let saved: string[] = [];
+    try { saved = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "[]"); } catch { /* storage blocked */ }
+    const t = setTimeout(() => setHiddenSamples(Array.isArray(saved) ? saved : []), 0);
+    return () => clearTimeout(t);
+  }, []);
+  const removeAccount = useCallback(async (handle: string) => {
+    if (fromGrok.some((a) => a.handle === handle)) {
+      setFromGrok((cur) => cur.filter((a) => a.handle !== handle));
+      await fetch(`/api/readings?handle=${encodeURIComponent(handle.replace(/^@/, ""))}`, { method: "DELETE" }).catch(() => {});
+      loadReadings();
+    } else {
+      setHiddenSamples((cur) => {
+        const next = [...new Set([...cur, handle])];
+        try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(next)); } catch { /* not remembered */ }
+        return next;
+      });
+    }
+  }, [fromGrok, loadReadings]);
+
+  const listed = [...fromGrok, ...ACCOUNTS.filter((a) => !hiddenSamples.includes(a.handle))];
+  // Never empty: the other views need at least one account, so the samples come back if everything was removed.
+  const accounts = listed.length ? listed : ACCOUNTS;
   const account = accounts.find((a) => a.handle === chosen) ?? accounts[0];
   const isSample = account.source !== "grok";
   const all = stances(account);
@@ -83,11 +110,17 @@ export default function Page() {
     <main className="mx-auto grid w-full max-w-5xl gap-4 px-4 py-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
-          <h1><XAlphaLogo className="h-8 w-auto" title="X Alpha" /></h1>
+          <h1>
+            {/* The logo goes home: back to the dashboard from any view. */}
+            <button type="button" onClick={() => setMode("dashboard")} aria-label="X Alpha, go to dashboard"
+              className="block rounded-md outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring">
+              <XAlphaLogo className="h-8 w-auto" title="X Alpha" />
+            </button>
+          </h1>
           {/* No frame around the tabs; only the chosen tab gets a box, the same as the theme toggle (38px, 12px corners,
               card background, hairline border). Arc rounds the tab 4px less than --radius-control, hence 16px. */}
           <span className="flex" style={{ "--radius-control": "16px", "--control-height-sm": "38px", "--surface": "var(--card)" } as React.CSSProperties}>
-            <SegmentedControl label="View" className="border-0! bg-transparent! [&>div]:p-0!" value={mode} onValueChange={(v) => { setMode(v as typeof mode); if (v === "compare") { setCompareSet(null); setPair(null); } }}
+            <SegmentedControl label="View" className="border-0! bg-transparent! [&>div]:rounded-none! [&>div]:p-0!" value={mode} onValueChange={(v) => { setMode(v as typeof mode); if (v === "compare") { setCompareSet(null); setPair(null); } }}
               options={[{ value: "dashboard", label: "Dashboard" }, { value: "account", label: "Account" }, { value: "compare", label: "Compare" }]} />
           </span>
         </div>
@@ -115,7 +148,7 @@ export default function Page() {
       </header>
 
       {mode === "dashboard" ? (
-        <Dashboard accounts={accounts} prices={prices} now={now} onSaved={loadReadings}
+        <Dashboard accounts={accounts} prices={prices} now={now} onSaved={loadReadings} onRemove={removeAccount}
           onOpen={(h) => { setChosen(h); setPicked(null); setLadderIndex(null); setMode("account"); }}
           onCompare={(hs) => { setCompareSet(hs); setPair([hs[0], hs[1]]); setMode("compare"); }} />
       ) : mode === "compare" && compareSet && pair ? (<>
@@ -127,7 +160,9 @@ export default function Page() {
         <CompareView key={account.handle} accounts={accounts} prices={prices} initialA={account.handle} />
       ) : (<>
       {/* Accounts Grok Bot read stay in view; the invented samples fold behind "+N more". */}
-      <nav aria-label="Accounts" style={{ ...neutralAccent, "--control-height-sm": "38px", "--text-sm": "0.875rem", "--space-2": "0.625rem" } as React.CSSProperties}>
+      {/* Same card as Compare's "Choose accounts" box. */}
+      <nav aria-label="Accounts" className={`${card} grid gap-1.5`} style={{ ...neutralAccent, "--control-height-sm": "38px", "--text-sm": "0.875rem", "--space-2": "0.625rem" } as React.CSSProperties}>
+        <span className={label}>Account</span>
         <ChipGroup label="Account" multiple={false}
           maxVisible={fromGrok.length > 0 ? fromGrok.length : Infinity}
           value={[account.handle]}
@@ -171,7 +206,7 @@ export default function Page() {
         <Market symbol={symbol} odds={odds} ladders={ladders} ladder={ladder} onLadder={setLadderIndex} marks={[{ account, match }]} />
       </section>
       </>)}
-      <p className="text-center text-xs text-muted-foreground">Shown for review only. X Alpha places no trades.</p>
+      <SiteFooter onHome={() => { setMode("dashboard"); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
     </main>
   );
 }

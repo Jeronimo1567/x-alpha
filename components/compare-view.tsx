@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { ArrowDownRight, ArrowUpRight, Check, ChevronDown } from "lucide-react";
 import { Avatar } from "@/components/account-avatar";
+import { GeminiLogo } from "@/components/brand-logos";
+import { AsciiBackdrop } from "@/components/ascii-backdrop";
 import { ChipGroup } from "@/components/arc/chip-group/chip-group";
 import { ConfidenceMeter, confidenceLevel } from "@/components/confidence";
 import { Market } from "@/components/market";
@@ -104,51 +106,62 @@ export function CompareView({ accounts, prices, initialA, initialB }: { accounts
 
   return (
     <>
-      <section className={`${card} grid gap-5`} aria-label="Compare accounts">
-        {/* Face-off: big profile pictures with VS between them; under each, the name and their current position
-            on this token from their posts. The chips to swap accounts only show when there are others to pick. */}
-        <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-3 sm:gap-6">
-          {([[A, "First account", accountOptions(b.handle), a.handle, setA], [B, "Second account", accountOptions(a.handle), b.handle, setB]] as const).map(([s, which, options, value, set], n) => (
-            <div key={which} className={`grid justify-items-center gap-3 text-center ${n === 1 ? "col-start-3" : ""}`}>
-              <Avatar account={s.account} className="size-20 text-2xl ring-2 ring-foreground/10 sm:size-28 sm:text-3xl" />
-              <div className="grid min-w-0 gap-0.5">
-                <span className="truncate text-lg font-semibold">{displayName(s.account)}</span>
-                <span className="truncate text-xs text-muted-foreground">{s.account.handle}</span>
-              </div>
-              <div className="grid justify-items-center gap-1">
-                <span className={label}>Position on {symbol}</span>
-                <span className="text-base"><Lean s={s} /></span>
-              </div>
-              {accounts.length > 2 && (
-                <div style={accountChips} className="flex justify-center [&_[role=group]]:justify-center [&_[role=group]>div]:justify-center">
-                  <ChipGroup label={which} multiple={false} options={options} value={[value]}
-                    onValueChange={(v) => { if (v[0]) { set(v[0]); reset(); } }} />
-                </div>
-              )}
+      {/* Who is compared: chosen first, above the face-off. Only shown when there are other accounts to pick. */}
+      {accounts.length > 2 && (
+        <section className={`${card} grid gap-3 md:grid-cols-2`} aria-label="Choose accounts">
+          {([["First account", accountOptions(b.handle), a.handle, setA], ["Second account", accountOptions(a.handle), b.handle, setB]] as const).map(([which, options, value, set]) => (
+            <div key={which} style={accountChips} className="grid gap-1.5">
+              <span className={label}>{which}</span>
+              <ChipGroup label={which} multiple={false} options={options} value={[value]}
+                onValueChange={(v) => { if (v[0]) { set(v[0]); reset(); } }} />
             </div>
           ))}
-          <span className="col-start-2 row-start-1 mt-[22px] self-start text-3xl leading-9 font-bold tracking-tight text-muted-foreground sm:mt-8 sm:text-5xl sm:leading-[48px]">VS</span>
-        </div>
+        </section>
+      )}
 
-        <div className="flex flex-wrap items-center gap-3">
-          <span className={label}>Token</span>
-          <div style={neutralAccent}>
-            <ChipGroup label="Token" multiple={false} value={[symbol]} onValueChange={(v) => { if (v[0]) { setPicked(v[0] as TokenSymbol); setLadderIndex(null); } }}
-              options={TOKENS.map((t) => {
-                const any = posted(sa, t) || posted(sb, t);
-                return {
-                  value: t,
-                  label: (
-                    <span className="flex items-center gap-1.5" title={any ? TOKEN_NAMES[t] : `Neither posted about ${t} this week`}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={`/tokens/${t.toLowerCase()}.svg`} alt="" className={`size-4 ${any ? "" : "opacity-50 grayscale"}`} />
-                      {t}
-                    </span>
-                  ),
-                };
-              })} />
+      {/* Face-off hero: the same box as the dashboard hero, with a still field of dotted lines fanning out from the VS, with both people on top of it. */}
+      <section className={`${card} relative isolate overflow-hidden p-0`} aria-label="Face-off">
+        <AsciiBackdrop id="depth" />
+        <div className="relative grid min-h-[248px] grid-cols-[1fr_auto_1fr] items-center gap-3 px-6 py-5 sm:gap-6">
+          {[A, B].map((s, n) => (
+            <div key={s.account.handle} className={`grid justify-items-center gap-2.5 text-center ${n === 1 ? "col-start-3" : ""}`}>
+              <Avatar account={s.account} className="size-20 text-2xl ring-2 ring-foreground/10 sm:size-24 sm:text-3xl" />
+              {/* Frosted so the moving line behind never runs through the name. */}
+              <div className="grid min-w-0 justify-items-center gap-2 rounded-xl bg-card/70 px-4 py-2 backdrop-blur-sm">
+                <div className="grid min-w-0 gap-0.5">
+                  <span className="truncate text-lg font-semibold">{displayName(s.account)}</span>
+                  <span className="truncate text-xs text-muted-foreground">{s.account.handle}</span>
+                </div>
+                <div className="grid justify-items-center gap-1">
+                  <span className={label}>Position on {symbol}</span>
+                  <span className="text-base"><Lean s={s} /></span>
+                </div>
+              </div>
+            </div>
+          ))}
+          {/* VS: green-to-red like the walls behind it (bids left, asks right), a faint diagonal slash and a soft glow.
+              Both layers share the same padding: room for the italic overhang, so the S isn't clipped and the glow lines up. */}
+          <div className="col-start-2 row-start-1 grid select-none justify-items-center" aria-label="versus">
+            <div className="vs-mark relative grid place-items-center">
+              <span aria-hidden="true" className="absolute h-24 w-px rotate-[22deg] bg-linear-to-b from-transparent via-foreground/25 to-transparent sm:h-28" />
+              <span aria-hidden="true" className="absolute opacity-(--vs-glow)">
+                <span className="block bg-linear-to-r from-(--vs-a) to-(--vs-b) bg-clip-text py-1 pr-4 pl-2 text-4xl font-black tracking-tighter text-transparent italic blur-xl sm:text-6xl">VS</span>
+              </span>
+              <span aria-hidden="true" className="relative bg-linear-to-r from-(--vs-a) via-(--vs-mid) to-(--vs-b) bg-clip-text py-1 pr-4 pl-2 text-4xl font-black tracking-tighter text-transparent italic sm:text-6xl">VS</span>
+            </div>
           </div>
         </div>
+      </section>
+
+      <section className={`${card} grid gap-5`} aria-label="Compare accounts">
+        <div className="flex flex-wrap items-center gap-3">
+          <TokenMenu value={symbol} onPick={(t) => { setPicked(t); setLadderIndex(null); }}
+            people={[displayName(a), displayName(b)]}
+            counts={TOKENS.map((t) => [t, sa.find((x) => x.symbol === t)!.posts, sb.find((x) => x.symbol === t)!.posts] as const)} />
+        </div>
+
+        {/* Both sets of calls on one price line first; the read and the contracts follow. */}
+        <PriceCallsChart symbol={symbol} series={prices?.[symbol]} sources={sides.map((s) => ({ account: s.account, calls: s.calls }))} />
 
         <p className="text-lg leading-[1.9] text-pretty">
           {A.stance.score !== null && B.stance.score !== null
@@ -164,8 +177,6 @@ export function CompareView({ accounts, prices, initialA, initialB }: { accounts
         <div className="grid gap-3 md:grid-cols-2">
           {sides.map((s, n) => <SidePanel key={s.account.handle} s={s} symbol={symbol} ladder={ladder} leads={lead === n} loading={odds.status === "loading"} unavailable={odds.status === "error"} />)}
         </div>
-
-        <PriceCallsChart symbol={symbol} series={prices?.[symbol]} sources={sides.map((s) => ({ account: s.account, calls: s.calls }))} />
       </section>
 
       <Market symbol={symbol} odds={odds} ladders={ladders} ladder={ladder} onLadder={setLadderIndex} marks={sides.map((s) => ({ account: s.account, match: s.match }))} />
@@ -223,9 +234,12 @@ function SidePanel({ s, symbol, ladder, leads, loading, unavailable }: { s: Side
                 ? <>Based on <span className="font-medium text-foreground">{usd(m.target.price)}</span> <span className="italic">&ldquo;{m.target.quote}&rdquo;</span></>
                 : "No price level named; uses the lean and typical move."}
             </div>
+            {/* Solid call to action naming the exact bet, with Gemini's mark; lifts slightly on hover. */}
             <a href={geminiUrl(ladder)} target="_blank" rel="noreferrer"
-              className="flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium ring-1 ring-foreground/15 outline-none hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring">
-              Trade on Gemini ↗
+              className="group mt-1 flex h-10 items-center justify-center gap-2 rounded-[12px] bg-foreground px-4 text-sm font-semibold text-background shadow-sm outline-none transition hover:-translate-y-px hover:shadow-md hover:opacity-95 focus-visible:ring-2 focus-visible:ring-ring active:translate-y-0">
+              <span className="grid size-5 place-items-center rounded-full bg-background text-foreground"><GeminiLogo className="size-3" /></span>
+              Buy {m.side === "yes" ? "Yes" : "No"} at {cents(m.price)} on Gemini
+              <ArrowUpRight className="size-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" strokeWidth={2.25} aria-hidden="true" />
             </a>
           </>
         ) : (
@@ -234,6 +248,61 @@ function SidePanel({ s, symbol, ladder, leads, loading, unavailable }: { s: Side
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * One button for the coin being compared. It opens a list of every coin with how many posts each person made about
+ * it this week, so you can see before picking whether there is anything to compare.
+ */
+function TokenMenu({ value, onPick, people, counts }: {
+  value: TokenSymbol; onPick: (t: TokenSymbol) => void; people: [string, string];
+  counts: (readonly [TokenSymbol, number, number])[];
+}) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", esc); };
+  }, [open]);
+  const icon = (t: TokenSymbol, dim = false) => (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={`/tokens/${t.toLowerCase()}.svg`} alt="" className={`size-4 shrink-0 ${dim ? "opacity-50 grayscale" : ""}`} />
+  );
+  return (
+    <div ref={box} className="relative">
+      <button type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}
+        className="flex h-9 items-center gap-2 rounded-[12px] border border-border bg-card px-3 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
+        {icon(value)}{value}<span className="font-normal text-muted-foreground">{TOKEN_NAMES[value]}</span>
+        <ChevronDown className={`size-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+      </button>
+      {open && (
+        <div role="listbox" aria-label="Coin to compare"
+          className="absolute top-full left-0 z-30 mt-2 grid w-[22rem] max-w-[calc(100vw-48px)] gap-0.5 rounded-xl border border-border bg-popover p-1.5 shadow-[var(--shadow-floating)]">
+          {counts.map(([t, na, nb]) => {
+            const none = na === 0 && nb === 0;
+            const who = (name: string, n: number) => <span className={n ? "text-foreground" : ""}>{name} {n || "–"}</span>;
+            return (
+              <button key={t} type="button" role="option" aria-selected={t === value} onClick={() => { onPick(t); setOpen(false); }}
+                className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted ${t === value ? "bg-muted" : ""}`}>
+                {icon(t, none)}
+                <span className={`grid min-w-0 flex-1 ${none ? "text-muted-foreground" : ""}`}>
+                  <span className="font-medium">{t} <span className="font-normal text-muted-foreground">{TOKEN_NAMES[t]}</span></span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {none ? "Neither posted about it this week" : <>Posts this week: {who(people[0], na)} · {who(people[1], nb)}</>}
+                  </span>
+                </span>
+                {t === value && <Check className="size-4 shrink-0" aria-hidden="true" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
