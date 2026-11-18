@@ -26,6 +26,7 @@ export function routinePrompt(handles: string[]) {
 - coins: for each of ${TOKENS.join(", ")} with something worth saying, its mood and one sentence
 - voices: 3 to 6 top voices, each with handle, name, profile picture URL, followers, their take in their words, mood and a link to the post
 - news: 3 to 6 stories, most important first, each with title, one or two sentence summary, link, source, when it broke, impact (bullish, bearish or mixed) and the coins it is about
+- suggested_accounts: 2 to 4 X accounts X Alpha isn't following yet that made clear, specific calls on these coins this week (named price levels, a clear side; no news bots), each with handle, name, profile picture URL, followers, one sentence on why, and the coins they call
 
 Then tell me the overall mood and anything that changed since the last run.`;
 }
