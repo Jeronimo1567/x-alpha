@@ -57,11 +57,11 @@ const TOOLS = [
       type: "object",
       properties: {
         mood: { ...MOOD, description: "Overall mood of the crypto market right now." },
-        headline: { type: "string", description: "One short line, like a newspaper headline, on the state of the market." },
-        summary: { type: "string", description: "Two to four sentences: what moved, why, and what people are watching next." },
+        headline: { type: "string", description: "A headline of 12 words or fewer on the state of the market." },
+        summary: { type: "string", description: "Two short sentences, under 300 characters: what moved and what people are watching." },
         coins: {
           type: "array", maxItems: 6, description: `One entry per coin X Alpha tracks (${COINS}) that has something worth saying.`,
-          items: { type: "object", properties: { symbol: symbolProp, mood: MOOD, note: { type: "string", description: "One sentence on that coin." } }, required: ["symbol", "mood", "note"], additionalProperties: false },
+          items: { type: "object", properties: { symbol: symbolProp, mood: MOOD, note: { type: "string", description: "One short sentence on that coin, under 100 characters." } }, required: ["symbol", "mood", "note"], additionalProperties: false },
         },
         voices: {
           type: "array", maxItems: 8, description: "The top voices on X driving the conversation, 3 to 6 of them.",
@@ -72,7 +72,7 @@ const TOOLS = [
               name: { type: "string", description: "Display name." },
               profile_image_url: { type: "string", description: "Profile picture URL from X (https://pbs.twimg.com/...)." },
               followers: { type: "string", description: "Follower count, short, like 1.2M." },
-              take: { type: "string", description: "Their view in one or two sentences, close to their words." },
+              take: { type: "string", description: "Their view in one sentence, under 140 characters, close to their words." },
               mood: MOOD,
               url: { type: "string", description: "Link to the post that best shows the take." },
             },
@@ -84,7 +84,7 @@ const TOOLS = [
           items: {
             type: "object",
             properties: {
-              title: { type: "string" }, summary: { type: "string", description: "One or two sentences." },
+              title: { type: "string", description: "Under 80 characters." }, summary: { type: "string", description: "One sentence, under 160 characters." },
               url: { type: "string", description: "Link to the story." }, source: { type: "string", description: "Outlet or account, like CoinDesk or @WatcherGuru." },
               at: { type: "string", description: "When it broke, ISO 8601." },
               impact: { ...MOOD, description: "Likely effect on crypto prices." },

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, Minus, Newspaper } from "lucide-react";
 import { Avatar } from "@/components/account-avatar";
 import { GrokBotLogo } from "@/components/brand-logos";
+import { Button } from "@/components/arc/button/button";
 import { CopyButton } from "@/components/arc/copy-button/copy-button";
 import { EmptyState } from "@/components/arc/empty-state/empty-state";
 import { HoverCard, HoverCardProfile } from "@/components/arc/hover-card/hover-card";
@@ -41,6 +42,8 @@ export function MarketBriefSection({ prices, handles, now, onSaved }: {
 }) {
   // After a suggestion's prompt is copied, check for the new reading every 15s for 10 minutes.
   const [waitUntil, setWaitUntil] = useState(0);
+  // Short by default: headline, two lines of summary, coins, three voices, three headlines. The rest on request.
+  const [full, setFull] = useState(false);
   useEffect(() => {
     if (!waitUntil) return;
     const id = setInterval(() => { if (Date.now() > waitUntil) { clearInterval(id); setWaitUntil(0); } else onSaved(); }, 15_000);
@@ -89,7 +92,7 @@ export function MarketBriefSection({ prices, handles, now, onSaved }: {
           </div>
         </div>
         <h2 className="text-2xl leading-tight font-semibold tracking-tight text-balance">{b.headline}</h2>
-        <p className="max-w-3xl leading-relaxed text-muted-foreground text-pretty">{b.summary}</p>
+        <p className={`max-w-3xl leading-relaxed text-muted-foreground text-pretty ${full ? "" : "line-clamp-2"}`}>{b.summary}</p>
       </div>
 
       {/* Each coin: its week of prices and Grok's one line on it. */}
@@ -100,7 +103,7 @@ export function MarketBriefSection({ prices, handles, now, onSaved }: {
           const change = values.length > 1 ? (values[values.length - 1] / values[0] - 1) : null;
           const c = byCoin.get(t);
           return (
-            <li key={t} className="grid content-start gap-1.5 rounded-lg bg-foreground/[0.03] p-2.5 ring-1 ring-foreground/[0.06]">
+            <li key={t} title={c?.note} className="grid content-start gap-1.5 rounded-lg bg-foreground/[0.03] p-2.5 ring-1 ring-foreground/[0.06]">
               <div className="flex items-center justify-between gap-1">
                 <span className="flex items-center gap-1.5 text-sm font-semibold">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -112,7 +115,7 @@ export function MarketBriefSection({ prices, handles, now, onSaved }: {
                 ? <Sparkline data={values} label="7D" width={150} height={36} interactive={false}
                     tone={change === null ? "accent" : change >= 0 ? "success" : "danger"} change={change === null ? undefined : signed(change)} />
                 : <span className="h-9" />}
-              {c && <p className="line-clamp-3 text-xs leading-snug text-muted-foreground">{c.note}</p>}
+              {full && c && <p className="text-xs leading-snug text-muted-foreground">{c.note}</p>}
             </li>
           );
         })}
@@ -123,7 +126,7 @@ export function MarketBriefSection({ prices, handles, now, onSaved }: {
         <div className="grid content-start gap-2">
           <h3 className="text-sm font-semibold">Top voices</h3>
           <ul className="grid gap-2">
-            {b.voices.map((v) => <VoiceRow key={v.handle} v={v} />)}
+            {(full ? b.voices : b.voices.slice(0, 3)).map((v) => <VoiceRow key={v.handle} v={v} full={full} />)}
           </ul>
         </div>
 
@@ -131,7 +134,7 @@ export function MarketBriefSection({ prices, handles, now, onSaved }: {
         <div className="grid content-start gap-2">
           <h3 className="text-sm font-semibold">Big news</h3>
           <ol className="grid gap-2">
-            {b.news.map((n, i) => {
+            {(full ? b.news : b.news.slice(0, 3)).map((n, i) => {
               const Tag = n.url ? "a" : "div";
               return (
                 <li key={n.title}>
@@ -143,7 +146,7 @@ export function MarketBriefSection({ prices, handles, now, onSaved }: {
                         <span className="text-sm leading-5 font-medium text-pretty">{n.title}</span>
                         <MoodChip mood={n.impact} className="shrink-0" />
                       </span>
-                      <span className="text-xs leading-relaxed text-muted-foreground text-pretty">{n.summary}</span>
+                      {full && <span className="text-xs leading-relaxed text-muted-foreground text-pretty">{n.summary}</span>}
                       <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                         {n.source && <span className="font-medium text-foreground/80">{n.source}</span>}
                         {n.at && now > 0 && <span>· {since(n.at, now)}</span>}
@@ -161,6 +164,14 @@ export function MarketBriefSection({ prices, handles, now, onSaved }: {
           </ol>
         </div>
       </div>
+
+      {(b.summary.length > 160 || b.voices.length > 3 || b.news.length > 3 || b.coins.length > 0) && (
+        <div className="-mt-2 flex justify-center">
+          <Button variant="ghost" size="sm" onClick={() => setFull((f) => !f)} aria-expanded={full}>
+            {full ? "Show less" : `Show full brief${b.news.length > 3 || b.voices.length > 3 ? ` (${Math.max(0, b.voices.length - 3) + Math.max(0, b.news.length - 3)} more)` : ""}`}
+          </Button>
+        </div>
+      )}
 
       {/* Accounts Grok Bot thinks are worth adding, minus the ones already saved. Copy the prompt to have Grok read one. */}
       {(() => {
@@ -210,7 +221,7 @@ function SuggestionCard({ a, onCopied }: { a: SuggestedAccount; onCopied: () => 
   );
 }
 
-function VoiceRow({ v }: { v: BriefVoice }) {
+function VoiceRow({ v, full }: { v: BriefVoice; full: boolean }) {
   const account = { handle: v.handle, name: v.name, avatar: v.avatar, bio: "", followers: v.followers ?? "", posts: [], source: "grok" as const };
   const Tag = v.url ? "a" : "div";
   return (
@@ -230,7 +241,7 @@ function VoiceRow({ v }: { v: BriefVoice }) {
           </span>
           <MoodChip mood={v.mood} className="shrink-0" />
         </span>
-        <span className="text-sm leading-snug text-pretty">&ldquo;{v.take}&rdquo;</span>
+        <span className={`text-sm leading-snug text-pretty ${full ? "" : "line-clamp-2"}`}>&ldquo;{v.take}&rdquo;</span>
       </Tag>
     </li>
   );

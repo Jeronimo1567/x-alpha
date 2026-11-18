@@ -22,10 +22,11 @@ export function routinePrompt(handles: string[]) {
 1. Accounts${handles.length ? `: ${handles.join(", ")}` : " (any you are asked to follow)"}. For each one, read every post from the last 7 days on X, label each with the token it is about (${coins}, or none), bullish, bearish or neutral, and a strength from 0 to 1, keeping any price levels in the text. Then call save_account_reading once per account with the handle, display name, profile picture URL, a one or two sentence summary and every post.
 
 2. Market brief. Search X and the news for the last 24 to 48 hours: what the most-followed crypto voices are saying and the biggest stories (ETF flows, regulation, hacks, listings, macro). Then call save_market_brief once with:
-- mood (bullish, bearish or mixed), a one-line headline and a 2 to 4 sentence summary
-- coins: for each of ${TOKENS.join(", ")} with something worth saying, its mood and one sentence
-- voices: 3 to 6 top voices, each with handle, name, profile picture URL, followers, their take in their words, mood and a link to the post
-- news: 3 to 6 stories, most important first, each with title, one or two sentence summary, link, source, when it broke, impact (bullish, bearish or mixed) and the coins it is about
+Keep it short, it is read at a glance:
+- mood (bullish, bearish or mixed), a headline of 12 words or fewer and a summary of two short sentences
+- coins: for each of ${TOKENS.join(", ")} with something worth saying, its mood and one short sentence
+- voices: 3 to 6 top voices, each with handle, name, profile picture URL, followers, their take in one sentence in their words, mood and a link to the post
+- news: 3 to 6 stories, most important first, each with a short title, a one-sentence summary, link, source, when it broke, impact (bullish, bearish or mixed) and the coins it is about
 - suggested_accounts: 2 to 4 X accounts X Alpha isn't following yet that made clear, specific calls on these coins this week (named price levels, a clear side; no news bots), each with handle, name, profile picture URL, followers, one sentence on why, and the coins they call
 
 Then tell me the overall mood and anything that changed since the last run.`;
