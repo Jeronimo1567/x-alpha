@@ -270,7 +270,3 @@
 :root:not([data-theme="dark"]) .ascii-backdrop .g2 { color: color-mix(in oklab, var(--good) 22%, transparent); }
 :root:not([data-theme="dark"]) .ascii-backdrop .r2 { color: color-mix(in oklab, var(--bad) 22%, transparent); }
 
-/* Compare VS colours: vivid green to red with a light middle on dark; brighter ends and a grey middle on light,
-   and a fainter glow there so it doesn't smudge. */
-.vs-mark { --vs-a: var(--good); --vs-mid: var(--foreground); --vs-b: var(--bad); --vs-glow: 0.45; }
-:root:not([data-theme="dark"]) .vs-mark { --vs-a: oklch(0.66 0.17 155); --vs-mid: oklch(0.62 0.03 260); --vs-b: oklch(0.62 0.21 20); --vs-glow: 0.2; }

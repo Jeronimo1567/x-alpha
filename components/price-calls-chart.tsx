@@ -6,7 +6,8 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Avatar } from "@/components/account-avatar";
 import { LineChart, type LineChartDatum } from "@/components/arc/line-chart/line-chart";
 import type { Account } from "@/lib/sample";
-import { selectable } from "@/lib/ui";
+import { ChipGroup } from "@/components/arc/chip-group/chip-group";
+import { neutralAccent } from "@/components/shared";
 import type { TokenSymbol } from "@/lib/stance";
 import type { Call, PriceSeries } from "@/lib/track";
 
@@ -44,7 +45,7 @@ export type CallSource = { account: Account; calls: Call[] };
  * Token price over the chosen range, as change from the start of the range so the move fills the plot.
  * Every bullish or bearish call sits on the line where it was posted; hover one to preview the post, click to open it on X.
  */
-export function PriceCallsChart({ symbol, series, sources }: { symbol: TokenSymbol; series: PriceSeries | undefined; sources: CallSource[] }) {
+export function PriceCallsChart({ symbol, series, sources, toolbar }: { symbol: TokenSymbol; series: PriceSeries | undefined; sources: CallSource[]; toolbar?: React.ReactNode }) {
   // With two accounts, each marker is that account's avatar, so you can tell whose call it was.
   const compare = sources.length > 1;
   const [range, setRange] = useState<Range>("7D");
@@ -92,24 +93,31 @@ export function PriceCallsChart({ symbol, series, sources }: { symbol: TokenSymb
     return { data, points, base, markers };
   }, [series, range, sources]);
 
-  if (!view) return <div className="grid place-items-center text-sm text-muted-foreground" style={{ height: HEIGHT + 60 }}>Loading {symbol} prices from Gemini…</div>;
+  if (!view) return (
+    <div className="grid gap-1.5">
+      {toolbar && <div className="min-w-0">{toolbar}</div>}
+      <div className="grid place-items-center text-sm text-muted-foreground" style={{ height: HEIGHT + 60 }}>Loading {symbol} prices from Gemini…</div>
+    </div>
+  );
 
   const preview = view.markers.find((m) => m.key === previewId) ?? null;
+  const empty = view.markers.length ? null : emptyHint(symbol, range, sources, view.points[view.points.length - 1][0]);
 
   return (
     <div className="grid gap-1.5">
-      <div className="flex items-center justify-end gap-2">
-        <div className="flex gap-1" role="group" aria-label="Range">
-          {(Object.keys(RANGES) as Range[]).map((r) => (
-            <button key={r} type="button" aria-pressed={r === range} onClick={() => { setRange(r); setPreviewId(null); }}
-              className={`rounded-full px-2.5 py-0.5 font-mono text-[11px] ${selectable(r === range)}`}>
-              {r}
-            </button>
-          ))}
+      {/* Range uses the same chips as the coin picker, on the same row as anything passed in (Compare's coins). */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">{toolbar}</div>
+        <div style={neutralAccent}>
+          <ChipGroup label="Range" multiple={false} value={[range]}
+            onValueChange={(v) => { if (v[0]) { setRange(v[0] as Range); setPreviewId(null); } }}
+            options={(Object.keys(RANGES) as Range[]).map((r) => ({ value: r, label: r }))} />
         </div>
       </div>
 
       <div className="relative">
+        {/* Nothing to mark: the chart blurs behind a note that says why and how to see their calls. */}
+        <div className={empty ? "pointer-events-none opacity-50 blur-[3px] transition-[filter,opacity] select-none" : "transition-[filter,opacity]"} aria-hidden={empty ? true : undefined}>
         <LineChart
           label={`${symbol} price change`}
           categoryLabel="Time"
@@ -120,6 +128,21 @@ export function PriceCallsChart({ symbol, series, sources }: { symbol: TokenSymb
           formatValue={(v) => `${usd(view.base * (1 + v / 100))} (${signed(v)})`}
           formatTick={(v) => signed(v, Number.isInteger(v) ? 0 : 1)}
         />
+        </div>
+        {empty && (
+          <div className="absolute inset-0 grid place-items-center p-4">
+            <div className="grid max-w-sm justify-items-center gap-2 rounded-xl bg-card/85 px-5 py-4 text-center shadow-lg ring-1 ring-foreground/10 backdrop-blur-sm">
+              <span className="text-sm font-semibold">{empty.title}</span>
+              <span className="text-xs leading-relaxed text-muted-foreground text-pretty">{empty.body}</span>
+              {empty.action && (
+                <button type="button" onClick={() => { setRange(empty.action!.range); setPreviewId(null); }}
+                  className="mt-1 h-8 rounded-[10px] bg-foreground px-3.5 text-xs font-semibold text-background outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring">
+                  {empty.action.label}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Calls drawn over the plot area only, so they line up with the line. */}
         <div className="pointer-events-none absolute top-0 left-0" style={{ right: GUTTER, height: HEIGHT }}>
@@ -155,21 +178,36 @@ export function PriceCallsChart({ symbol, series, sources }: { symbol: TokenSymb
       </div>
 
       <p className="text-xs text-muted-foreground">
-        {view.markers.length > 0 && compare
-          ? <>
-              {sources.map(({ account }) => (
-                <span key={account.handle} className="mr-3 inline-flex items-center gap-1 align-middle">
-                  <Avatar account={account} className="size-4 text-[7px]" />{account.handle}
-                </span>
-              ))}
-              · ring and badge show the lean ({<span className="text-good">green</span>} bullish, {<span className="text-bad">red</span>} bearish). Hover a call to preview it.
-            </>
-          : view.markers.length > 0
-          ? <><ArrowUpRight className="inline size-3.5 text-good" strokeWidth={2.75} aria-hidden="true" /> bullish · <ArrowDownRight className="inline size-3.5 text-bad" strokeWidth={2.75} aria-hidden="true" /> bearish · hover a call to see the post</>
-          : `No ${symbol} calls in this range.`}
+        {view.markers.length > 0 && <><ArrowUpRight className="inline size-3.5 text-good" strokeWidth={2.75} aria-hidden="true" /> bullish · <ArrowDownRight className="inline size-3.5 text-bad" strokeWidth={2.75} aria-hidden="true" /> bearish</>}
       </p>
     </div>
   );
+}
+
+/**
+ * Nothing to mark: say why, and how to see their calls. Calls older than this range → offer the longer range;
+ * older than every range → when the latest one was; none at all → that their posts never picked a direction.
+ */
+function emptyHint(symbol: TokenSymbol, range: Range, sources: CallSource[], end: number): { title: string; body: string; action?: { label: string; range: Range } } {
+  const calls = sources.flatMap((s) => s.calls);
+  const one = sources.length === 1 ? sources[0].account.handle : null;
+  if (!calls.length) {
+    return {
+      title: `No ${symbol} calls yet`,
+      body: `${one ? `${one}'s` : "Their"} posts about ${symbol} never picked a direction, so there's nothing to mark. Pick a coin with a lean to see their calls here.`,
+    };
+  }
+  const longest = (Object.keys(RANGES) as Range[]).at(-1)!;
+  const hidden = calls.filter((c) => c.postedAt >= end - RANGES[longest].days * DAY).length;
+  if (range !== longest && hidden) {
+    return {
+      title: `${hidden} ${symbol} call${hidden === 1 ? "" : "s"} hidden`,
+      body: `None in the last ${RANGES[range].days} days. Switch to ${RANGES[longest].days} days to see ${hidden === 1 ? "it" : "them"} on the chart.`,
+      action: { label: `Show ${RANGES[longest].days} days`, range: longest },
+    };
+  }
+  const latest = Math.max(...calls.map((c) => c.postedAt));
+  return { title: `No ${symbol} calls in this range`, body: `The latest was ${day(latest)}, before this chart starts.` };
 }
 
 /** The post behind a call, styled like a small X card, floating above (or below) its marker. Clicking opens it on X. */

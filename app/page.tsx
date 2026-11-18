@@ -11,11 +11,12 @@ import { Dashboard } from "@/components/dashboard";
 import { Confidence } from "@/components/confidence";
 import { Market } from "@/components/market";
 import { PriceCallsChart } from "@/components/price-calls-chart";
+import { ContractTicket, ContractTicketEmpty, OtherMarkets, SourceTweet, type OtherMarket } from "@/components/contract-ticket";
 import { since, SourceStatus } from "@/components/source-status";
 import { SiteFooter } from "@/components/site-footer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { XAlphaLogo } from "@/components/x-alpha-logo";
-import { DAY_MS, OddsState, Tag, card, cents, clock, date, geminiUrl, label, neutralAccent, pct, sideOf, signed, stamp, usd, useOdds, when, displayName } from "@/components/shared";
+import { DAY_MS, OddsState, Tag, card, cents, clock, date, label, neutralAccent, pct, sideOf, signed, stamp, usd, useOdds, when, displayName } from "@/components/shared";
 
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import type { Ladder, Match } from "@/lib/gemini";
@@ -99,7 +100,12 @@ export default function Page() {
   const ladder = ladders.length ? ladders[ladderIndex ?? ladders.length - 1] ?? ladders[ladders.length - 1] : null; // default: longest horizon
   const side = sideOf(stance.score);
   // Best contract for this account: its named targets, conviction and track record against the live odds (lib/pick).
-  const best = ladder ? bestContract({ ladder, symbol, score: stance.score, posts: account.posts, record: tokenRecord, ref: prices?.[symbol]?.at(-1)?.[1] ?? null }) : null;
+  const pickOn = (l: Ladder) => bestContract({ ladder: l, symbol, score: stance.score, posts: account.posts, record: tokenRecord, ref: prices?.[symbol]?.at(-1)?.[1] ?? null });
+  const best = ladder ? pickOn(ladder) : null;
+  // No pick on the chosen date: other dates on this coin where their view still has an edge.
+  const otherMarkets: OtherMarket[] = best && !best.pick && sideOf(stance.score)
+    ? ladders.flatMap((l, index) => { if (l === ladder) return []; const p = pickOn(l).pick; return p ? [{ index, ladder: l, pick: p }] : []; })
+    : [];
   const match = best?.pick ?? null;
 
   const lastRun = fromGrok.length ? Math.max(...fromGrok.map((a) => Date.parse(a.analyzedAt!))) : null;
@@ -199,7 +205,9 @@ export default function Page() {
 
         <PriceCallsChart symbol={symbol} series={prices?.[symbol]} sources={singleSource} />
 
-        <ContractCard symbol={symbol} stance={stance} handle={displayName(account)} result={best} ladder={ladder} odds={odds} record={tokenRecord} calls={tokenCalls} />
+        <ContractCard account={account} symbol={symbol} stance={stance} handle={displayName(account)} result={best} ladder={ladder} odds={odds} record={tokenRecord} calls={tokenCalls} current={prices?.[symbol]?.at(-1)?.[1] ?? null}
+          others={otherMarkets} onLadder={setLadderIndex}
+          leaning={all.filter((t) => t.symbol !== symbol && sideOf(t.score)).map((t) => t.symbol)} onPick={pick} />
       </section>
 
       <section>
@@ -301,9 +309,9 @@ function Verdict({ symbol, stance, handle, tally, pricesReady, match, ladder, od
  * The best Gemini contract for the account's view (lib/pick): what it costs and pays, the account's odds next to
  * the market's, the price levels from its posts that drove the pick, and the runner-ups.
  */
-function ContractCard({ symbol, stance, handle, result, ladder, odds, record, calls }: {
-  symbol: TokenSymbol; stance: TokenStance; handle: string; result: PickResult | null; ladder: Ladder | null; odds: OddsState;
-  record: Tally | null; calls: Call[];
+function ContractCard({ account, symbol, stance, handle, result, ladder, odds, record, calls, current, others, onLadder, leaning, onPick }: {
+  account: Account; symbol: TokenSymbol; stance: TokenStance; handle: string; result: PickResult | null; ladder: Ladder | null; odds: OddsState;
+  record: Tally | null; calls: Call[]; current: number | null; others: OtherMarket[]; onLadder: (i: number) => void; leaning: TokenSymbol[]; onPick: (t: TokenSymbol) => void;
 }) {
   const side = sideOf(stance.score);
   const match = result?.pick ?? null;
@@ -317,14 +325,15 @@ function ContractCard({ symbol, stance, handle, result, ladder, odds, record, ca
   );
   if (!match || !ladder || !side) {
     return (
-      <div className="grid content-start gap-1 rounded-lg p-3 ring-1 ring-foreground/10 sm:col-span-2 lg:col-span-1">
+      <div className="grid content-start gap-3 rounded-lg p-4 ring-1 ring-foreground/10 sm:col-span-2 lg:col-span-1">
         {head}
-        <div className="mt-1 text-2xl font-semibold">–</div>
-        <div className="text-xs text-muted-foreground">
-          {!side ? "No clear lean to match." : odds.status === "loading" ? "Checking Gemini's odds…" : odds.status === "error" ? "Gemini's prediction markets aren't responding right now. Try again in a minute." : result?.reason ?? `No live ${symbol} contract on that side right now.`}
-        </div>
+        <ContractTicketEmpty
+          title={!side ? "No side to take" : odds.status === "loading" ? "Checking Gemini's odds…" : odds.status === "error" ? "Gemini isn't responding" : result?.reason?.startsWith("The market already") ? "Already priced in" : `No ${symbol} contract`}
+          body={!side ? (stance.score === null ? `${handle} hasn't posted about ${symbol} this week.` : `${handle}'s ${symbol} posts are split.`) : odds.status === "loading" ? "One moment." : odds.status === "error" ? "Try again in a minute." : result?.reason?.startsWith("The market already") ? `Gemini's odds already match ${handle}'s view on this date, so no contract has an edge.` : result?.reason ?? `No live ${symbol} contract on that side right now.`}>
+          {odds.status === "loading" || odds.status === "error" ? null : <OtherMarkets others={others} leaning={leaning} onLadder={onLadder} onCoin={onPick} />}
+        </ContractTicketEmpty>
         {/* Shown here too: low confidence is often why there's no pick. */}
-        {side && <div className="mt-2"><Confidence record={record} calls={calls} symbol={symbol} /></div>}
+        {side && <div><Confidence record={record} calls={calls} symbol={symbol} /></div>}
       </div>
     );
   }
@@ -342,20 +351,8 @@ function ContractCard({ symbol, stance, handle, result, ladder, odds, record, ca
       {head}
       <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
       <div className="grid content-start gap-3">
-      {/* The contract itself, highlighted in its side's colour: the side and its share price at the same size. */}
-      <div className={`grid gap-2 rounded-md p-3 ring-1 ${yes ? "bg-good-soft/40 ring-good/30" : "bg-bad-soft/40 ring-bad/30"}`}>
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-          <div className="flex items-center gap-2 text-2xl leading-9 font-semibold">
-            <span className={`rounded-md px-2 ${yes ? "bg-good-soft text-good" : "bg-bad-soft text-bad"}`}>{yes ? "Yes" : "No"}</span>
-            <span className="tabular-nums">{cents(match.price)}</span>
-          </div>
-          <span className="text-2xl leading-9 font-semibold tabular-nums" title={`Pays $1 per share if right: ${(1 / match.price).toFixed(1)}× what you paid`}>{(1 / match.price).toFixed(1)}×</span>
-        </div>
-        <div className="text-sm leading-snug">
-          <span className="font-medium">{symbol} {match.rung.label}</span>
-          <span className="text-muted-foreground"> · settles {when(ladder.expiry)}</span>
-        </div>
-      </div>
+      {/* The contract, laid out like Gemini's own market card. */}
+      <ContractTicket symbol={symbol} ladder={ladder} side={match.side} rung={match.rung} price={match.price} current={current} live={odds.status === "ready"} />
 
       <Confidence record={record} calls={calls} symbol={symbol} />
       </div>
@@ -370,18 +367,10 @@ function ContractCard({ symbol, stance, handle, result, ladder, odds, record, ca
         </div>
       </div>
 
-      <div className="truncate border-t border-foreground/[0.07] pt-2.5 text-xs text-muted-foreground">
-        {match.target
-          ? <>Based on <a href={match.target.url} target="_blank" rel="noreferrer" className="font-medium text-foreground underline-offset-2 hover:underline">{usd(match.target.price)}</a> <span className="italic">&ldquo;{match.target.quote}&rdquo;</span></>
-          : "No price level named; uses the lean and their typical move."}
-      </div>
+      <div className="border-t border-foreground/[0.07] pt-2.5"><SourceTweet account={account} pick={match} symbol={symbol} /></div>
       </div>
       </div>
 
-      <a href={geminiUrl(ladder)} target="_blank" rel="noreferrer"
-        className="flex items-center justify-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring">
-        Trade on Gemini ↗
-      </a>
     </div>
   );
 }

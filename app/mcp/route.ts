@@ -1,5 +1,6 @@
 // A small MCP server (Streamable HTTP, stateless) so an agent such as Grok Bot can
 // call X Alpha's tools. It reads Gemini's public market data and stores account readings. No trades.
+import { cleanBrief, getBrief, saveBrief } from "@/lib/brief";
 import { ladders, matchContract, type Ladder } from "@/lib/gemini";
 import { cleanAvatar, cleanHandle, cleanPosts, getReading, saveReading, toAccount, type Reading } from "@/lib/readings";
 import { allPrices } from "@/lib/prices";
@@ -11,6 +12,7 @@ const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const round = (n: number | null, d = 2) => (n === null ? null : Number(n.toFixed(d)));
 
 const COINS = TOKENS.map((t) => `${t} (${TOKEN_NAMES[t]})`).join(", ");
+const MOOD = { type: "string", enum: ["bullish", "bearish", "mixed"] } as const;
 const symbolProp = { type: "string", enum: [...TOKENS], description: `Token symbol: ${COINS}.` };
 const horizonProp = {
   type: "string", enum: ["soonest", "longest"],
@@ -46,6 +48,59 @@ const TOOLS = [
       },
       required: ["handle", "summary", "posts"], additionalProperties: false,
     },
+  },
+  {
+    name: "save_market_brief",
+    description:
+      `Part of the routine, after reading the accounts: send X Alpha a brief on how crypto looks right now. Search X and the news for the last 24 to 48 hours yourself: what the most-followed crypto voices are saying, and the biggest stories (ETF flows, regulation, hacks, listings, macro). X Alpha shows it at the top of the dashboard. Each run replaces the last brief.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        mood: { ...MOOD, description: "Overall mood of the crypto market right now." },
+        headline: { type: "string", description: "One short line, like a newspaper headline, on the state of the market." },
+        summary: { type: "string", description: "Two to four sentences: what moved, why, and what people are watching next." },
+        coins: {
+          type: "array", maxItems: 6, description: `One entry per coin X Alpha tracks (${COINS}) that has something worth saying.`,
+          items: { type: "object", properties: { symbol: symbolProp, mood: MOOD, note: { type: "string", description: "One sentence on that coin." } }, required: ["symbol", "mood", "note"], additionalProperties: false },
+        },
+        voices: {
+          type: "array", maxItems: 8, description: "The top voices on X driving the conversation, 3 to 6 of them.",
+          items: {
+            type: "object",
+            properties: {
+              handle: { type: "string", description: "X username, like @example." },
+              name: { type: "string", description: "Display name." },
+              profile_image_url: { type: "string", description: "Profile picture URL from X (https://pbs.twimg.com/...)." },
+              followers: { type: "string", description: "Follower count, short, like 1.2M." },
+              take: { type: "string", description: "Their view in one or two sentences, close to their words." },
+              mood: MOOD,
+              url: { type: "string", description: "Link to the post that best shows the take." },
+            },
+            required: ["handle", "take", "mood"], additionalProperties: false,
+          },
+        },
+        news: {
+          type: "array", maxItems: 8, description: "The biggest stories, 3 to 6, most important first.",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" }, summary: { type: "string", description: "One or two sentences." },
+              url: { type: "string", description: "Link to the story." }, source: { type: "string", description: "Outlet or account, like CoinDesk or @WatcherGuru." },
+              at: { type: "string", description: "When it broke, ISO 8601." },
+              impact: { ...MOOD, description: "Likely effect on crypto prices." },
+              tokens: { type: "array", items: { type: "string", enum: [...TOKENS] }, description: "Coins it is mainly about, if any." },
+            },
+            required: ["title", "summary", "impact"], additionalProperties: false,
+          },
+        },
+      },
+      required: ["mood", "headline", "summary", "voices", "news"], additionalProperties: false,
+    },
+  },
+  {
+    name: "get_market_brief",
+    description: "The last market brief saved to X Alpha, to compare against before writing a new one.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "get_account_reading",
@@ -135,6 +190,12 @@ async function callTool(name: string, args: Record<string, unknown>, ctx: { canW
     });
     return { saved: true, profile_picture_saved: Boolean(saved.avatar), ...(await report(saved, ctx.origin)) };
   }
+  if (name === "save_market_brief") {
+    if (!ctx.canWrite) throw new Error("This server needs its key to save. Reconnect using the MCP address that ends in ?key=...");
+    const b = await saveBrief(cleanBrief(args));
+    return { saved: true, saved_at: b.savedAt, coins: b.coins.length, voices: b.voices.length, news: b.news.length, dashboard: ctx.origin };
+  }
+  if (name === "get_market_brief") return (await getBrief()) ?? { message: "No brief saved yet. Use save_market_brief." };
   if (name === "get_account_reading") {
     const handle = cleanHandle(args.handle);
     const r = await getReading(handle);
@@ -174,8 +235,8 @@ async function handle(msg: Rpc, ctx: { canWrite: boolean; origin: string }) {
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: {} },
-        serverInfo: { name: "x-alpha", version: "0.3.0" },
-        instructions: `X Alpha turns an X account's recent posts into a lean per crypto token (${COINS}) and matches it to live Gemini prediction market odds. Read the account on X, then call save_account_reading. Nothing here places trades.`,
+        serverInfo: { name: "x-alpha", version: "0.4.0" },
+        instructions: `X Alpha turns an X account's recent posts into a lean per crypto token (${COINS}) and matches it to live Gemini prediction market odds. Read the account on X, then call save_account_reading. As part of each routine run, also call save_market_brief with how crypto looks overall: top voices on X and the big news. Nothing here places trades.`,
       });
     }
     case "ping": return reply({});

@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { ArrowDownRight, ArrowUpRight, Check, ChevronDown } from "lucide-react";
+import { useState, type CSSProperties } from "react";
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { Avatar } from "@/components/account-avatar";
-import { GeminiLogo } from "@/components/brand-logos";
 import { AsciiBackdrop } from "@/components/ascii-backdrop";
 import { ChipGroup } from "@/components/arc/chip-group/chip-group";
-import { ConfidenceMeter, confidenceLevel } from "@/components/confidence";
+import { ConfidenceMeter } from "@/components/confidence";
 import { Market } from "@/components/market";
 import { PriceCallsChart } from "@/components/price-calls-chart";
-import { card, cents, displayName, geminiUrl, label, neutralAccent, pct, shortWhen, sideOf, signed, Tag, usd, useOdds } from "@/components/shared";
+import { ContractTicket, ContractTicketEmpty, OtherMarkets, SourceTweet, type OtherMarket } from "@/components/contract-ticket";
+import { card, cents, displayName, label, neutralAccent, pct, shortWhen, sideOf, signed, Tag, usd, useOdds } from "@/components/shared";
 import type { Ladder, Match } from "@/lib/gemini";
 import { bestContract, credibilityOf, type PickResult } from "@/lib/pick";
 import type { Account } from "@/lib/sample";
@@ -22,6 +22,10 @@ const accountChips = { ...neutralAccent, "--control-height-sm": "38px", "--text-
 type Side = {
   account: Account; stance: TokenStance; side: "bullish" | "bearish" | null;
   record: TokenRecord | null; calls: Call[]; match: Match | null; picked: PickResult | null;
+  /** When the chosen market has no pick: other dates on this coin where their view still has an edge. */
+  others: OtherMarket[];
+  /** Other coins they lean clearly on this week. */
+  leaning: TokenSymbol[];
 };
 
 /** Better record on this token: higher hit rate, then higher average gain. Null when neither has a judged call or they tie. */
@@ -62,6 +66,8 @@ export function CompareView({ accounts, prices, initialA, initialB }: { accounts
   const posted = (list: TokenStance[], t: TokenSymbol) => list.find((s) => s.symbol === t)!.posts > 0;
   // Default to a token both talked about, then one either did.
   const fallback = TOKENS.find((t) => posted(sa, t) && posted(sb, t)) ?? TOKENS.find((t) => posted(sa, t) || posted(sb, t)) ?? "BTC";
+  // Coins either account posted about most this week come first; ties keep the usual order.
+  const postCount = (t: TokenSymbol) => sa.find((s) => s.symbol === t)!.posts + sb.find((s) => s.symbol === t)!.posts;
   const [picked, setPicked] = useState<TokenSymbol | null>(null);
   const symbol = picked ?? fallback;
 
@@ -75,9 +81,14 @@ export function CompareView({ accounts, prices, initialA, initialB }: { accounts
     const record = prices ? trackRecord(account.posts, prices) : null;
     const side = sideOf(stance.score);
     const tokenRecord = record?.byToken.find((t) => t.token === symbol) ?? null;
-    const picked = ladder ? bestContract({ ladder, symbol, score: stance.score, posts: account.posts, record: tokenRecord, ref: prices?.[symbol]?.at(-1)?.[1] ?? null }) : null;
+    const pickOn = (l: Ladder) => bestContract({ ladder: l, symbol, score: stance.score, posts: account.posts, record: tokenRecord, ref: prices?.[symbol]?.at(-1)?.[1] ?? null });
+    const picked = ladder ? pickOn(ladder) : null;
+    const others = picked && !picked.pick && side
+      ? ladders.flatMap((l, index) => { if (l === ladder) return []; const p = pickOn(l).pick; return p ? [{ index, ladder: l, pick: p }] : []; })
+      : [];
+    const leaning = (n === 0 ? sa : sb).filter((t) => t.symbol !== symbol && sideOf(t.score)).map((t) => t.symbol);
     return {
-      account, stance, side, record: tokenRecord, picked,
+      account, stance, side, record: tokenRecord, picked, others, leaning,
       calls: record?.calls.filter((c) => c.token === symbol) ?? [],
       match: picked?.pick ?? null,
     };
@@ -91,18 +102,6 @@ export function CompareView({ accounts, prices, initialA, initialB }: { accounts
     label: <span className="flex items-center gap-2"><Avatar account={x} className="size-[26px] text-[10px]" />{x.handle}</span>,
   }));
   const reset = () => { setPicked(null); setLadderIndex(null); };
-
-  const token = (
-    <Tag title={TOKEN_NAMES[symbol]}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={`/tokens/${symbol.toLowerCase()}.svg`} alt="" className="size-[1.05em]" />
-      {symbol}
-      {prices?.[symbol]?.at(-1) && <span className="font-normal text-muted-foreground">{usd(prices[symbol]!.at(-1)![1] >= 1000 ? Math.round(prices[symbol]!.at(-1)![1]) : prices[symbol]!.at(-1)![1])}</span>}
-    </Tag>
-  );
-  const record = (s: Side) => s.record && s.record.settled > 0
-    ? <><Tag>{s.record.right}/{s.record.settled} right</Tag> ({signed(s.record.avgGain!)} each)</>
-    : <span className="text-muted-foreground">no judged calls yet</span>;
 
   return (
     <>
@@ -139,43 +138,42 @@ export function CompareView({ accounts, prices, initialA, initialB }: { accounts
               </div>
             </div>
           ))}
-          {/* VS: green-to-red like the walls behind it (bids left, asks right), a faint diagonal slash and a soft glow.
-              Both layers share the same padding: room for the italic overhang, so the S isn't clipped and the glow lines up. */}
-          <div className="col-start-2 row-start-1 grid select-none justify-items-center" aria-label="versus">
-            <div className="vs-mark relative grid place-items-center">
-              <span aria-hidden="true" className="absolute h-24 w-px rotate-[22deg] bg-linear-to-b from-transparent via-foreground/25 to-transparent sm:h-28" />
-              <span aria-hidden="true" className="absolute opacity-(--vs-glow)">
-                <span className="block bg-linear-to-r from-(--vs-a) to-(--vs-b) bg-clip-text py-1 pr-4 pl-2 text-4xl font-black tracking-tighter text-transparent italic blur-xl sm:text-6xl">VS</span>
-              </span>
-              <span aria-hidden="true" className="relative bg-linear-to-r from-(--vs-a) via-(--vs-mid) to-(--vs-b) bg-clip-text py-1 pr-4 pl-2 text-4xl font-black tracking-tighter text-transparent italic sm:text-6xl">VS</span>
-            </div>
+          {/* VS: minimal. Small muted letters between two hairlines. */}
+          <div className="col-start-2 row-start-1 grid select-none justify-items-center gap-2" aria-label="versus">
+            <span aria-hidden="true" className="h-8 w-px bg-linear-to-b from-transparent to-foreground/20" />
+            <span aria-hidden="true" className="font-mono text-xs tracking-[0.3em] text-muted-foreground uppercase">vs</span>
+            <span aria-hidden="true" className="h-8 w-px bg-linear-to-t from-transparent to-foreground/20" />
           </div>
         </div>
       </section>
 
       <section className={`${card} grid gap-5`} aria-label="Compare accounts">
-        <div className="flex flex-wrap items-center gap-3">
-          <TokenMenu value={symbol} onPick={(t) => { setPicked(t); setLadderIndex(null); }}
-            people={[displayName(a), displayName(b)]}
-            counts={TOKENS.map((t) => [t, sa.find((x) => x.symbol === t)!.posts, sb.find((x) => x.symbol === t)!.posts] as const)} />
-        </div>
-
         {/* Both sets of calls on one price line first; the read and the contracts follow. */}
-        <PriceCallsChart symbol={symbol} series={prices?.[symbol]} sources={sides.map((s) => ({ account: s.account, calls: s.calls }))} />
+        <PriceCallsChart symbol={symbol} series={prices?.[symbol]} sources={sides.map((s) => ({ account: s.account, calls: s.calls }))}
+          toolbar={
+            <div style={neutralAccent}>
+              <ChipGroup label="Coin" multiple={false} value={[symbol]} onValueChange={(v) => { if (v[0]) { setPicked(v[0] as TokenSymbol); setLadderIndex(null); } }}
+                options={[...TOKENS].sort((x, y) => postCount(y) - postCount(x)).map((t) => {
+                  const any = posted(sa, t) || posted(sb, t);
+                  return {
+                    value: t,
+                    label: (
+                      <span className="flex items-center gap-1.5" title={any ? TOKEN_NAMES[t] : `Neither posted about ${t} this week`}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={`/tokens/${t.toLowerCase()}.svg`} alt="" className={`size-4 ${any ? "" : "opacity-50 grayscale"}`} />
+                        {t}
+                      </span>
+                    ),
+                  };
+                })} />
+            </div>
+          } />
 
-        <p className="text-lg leading-[1.9] text-pretty">
-          {A.stance.score !== null && B.stance.score !== null
-            ? <>{displayName(A.account)} is <Lean s={A} /> and {displayName(B.account)} is <Lean s={B} /> on {token} this week.</>
-            : A.stance.score === null && B.stance.score === null
-              ? <>Neither {displayName(A.account)} nor {displayName(B.account)} posted about {token} this week.</>
-              : (() => { const [has, not] = A.stance.score !== null ? [A, B] : [B, A]; return <>{displayName(has.account)} is <Lean s={has} /> on {token} this week; {displayName(not.account)} hasn&apos;t posted about it.</>; })()}
-          {agree === false && <b className="font-semibold"> They disagree.</b>}
-          {agree === true && <b className="font-semibold"> They agree.</b>}
-          {" "}On {symbol}, {displayName(A.account)} has been {record(A)}; {displayName(B.account)} has been {record(B)}.
-        </p>
+        <Summary A={A} B={B} symbol={symbol} />
 
         <div className="grid gap-3 md:grid-cols-2">
-          {sides.map((s, n) => <SidePanel key={s.account.handle} s={s} symbol={symbol} ladder={ladder} leads={lead === n} loading={odds.status === "loading"} unavailable={odds.status === "error"} />)}
+          {sides.map((s, n) => <SidePanel key={s.account.handle} s={s} symbol={symbol} ladder={ladder} leads={lead === n} loading={odds.status === "loading"} unavailable={odds.status === "error"} current={prices?.[symbol]?.at(-1)?.[1] ?? null}
+            onLadder={setLadderIndex} onCoin={(t) => { setPicked(t); setLadderIndex(null); }} />)}
         </div>
       </section>
 
@@ -184,14 +182,47 @@ export function CompareView({ accounts, prices, initialA, initialB }: { accounts
   );
 }
 
+/** The lean as one coloured word: bearish / bullish / mixed. */
+function LeanWord({ s }: { s: Side }) {
+  if (!s.side) return <b className="font-semibold">mixed</b>;
+  return <b className={`font-semibold ${s.side === "bullish" ? "text-good" : "text-bad"}`}>{s.side}</b>;
+}
+
+/** One quiet sentence: where each stands this week, then their record on the token, muted. No pills. */
+function Summary({ A, B, symbol }: { A: Side; B: Side; symbol: TokenSymbol }) {
+  const na = displayName(A.account), nb = displayName(B.account);
+  const hasA = A.stance.score !== null, hasB = B.stance.score !== null;
+  const lean = hasA && hasB
+    ? A.side && A.side === B.side
+      ? <>{na} and {nb} are both <LeanWord s={A} /> on {symbol} this week.</>
+      : <>{na} is <LeanWord s={A} /> and {nb} is <LeanWord s={B} /> on {symbol} this week.</>
+    : hasA || hasB
+      ? (() => { const [has, not] = hasA ? [A, B] : [B, A]; return <>{displayName(has.account)} is <LeanWord s={has} /> on {symbol} this week; {displayName(not.account)} hasn&apos;t posted about it.</>; })()
+      : <>Neither {na} nor {nb} posted about {symbol} this week.</>;
+  const rec = (s: Side) => (s.record && s.record.settled > 0 ? `${s.record.right}/${s.record.settled}` : null);
+  const ra = rec(A), rb = rec(B);
+  const record = ra && rb ? `${na} is ${ra} on ${symbol} calls, ${nb} ${rb}.`
+    : ra || rb ? `${ra ? na : nb} is ${ra ?? rb} on ${symbol} calls; ${ra ? nb : na} has none judged yet.`
+    : null;
+  return (
+    <p className="text-lg leading-relaxed text-pretty">
+      {lean}{record && <span className="text-muted-foreground"> {record}</span>}
+    </p>
+  );
+}
+
 /** One account's numbers on the token, and the Gemini contract its lean points to. */
-function SidePanel({ s, symbol, ladder, leads, loading, unavailable }: { s: Side; symbol: TokenSymbol; ladder: Ladder | null; leads: boolean; loading: boolean; unavailable: boolean }) {
-  const rows: [string, React.ReactNode][] = [
-    ["Lean this week", <Lean key="l" s={s} />],
-    ["Posts this week", s.stance.posts],
-    [`${symbol} calls right`, s.record && s.record.settled > 0 ? `${s.record.right}/${s.record.settled}` : "–"],
-    ["Avg gain per call", s.record?.avgGain != null ? signed(s.record.avgGain) : "–"],
-    ["Confidence", <span key="c" className="flex items-center gap-2" title="How much their view counts against the market's, from past calls on this token"><ConfidenceMeter value={credibilityOf(s.record)} />{confidenceLevel(credibilityOf(s.record))} · {Math.round(credibilityOf(s.record) * 100)}%</span>],
+function SidePanel({ s, symbol, ladder, leads, loading, unavailable, current, onLadder, onCoin }: {
+  s: Side; symbol: TokenSymbol; ladder: Ladder | null; leads: boolean; loading: boolean; unavailable: boolean; current: number | null;
+  onLadder: (i: number) => void; onCoin: (t: TokenSymbol) => void;
+}) {
+  const live = !loading && !unavailable;
+  // Lean is already in the face-off and the record in the sentence above, so this is just three numbers.
+  const cred = credibilityOf(s.record);
+  const stats: [string, React.ReactNode, string?][] = [
+    ["Right on " + symbol, s.record && s.record.settled > 0 ? `${s.record.right}/${s.record.settled}` : "–"],
+    ["Avg per call", s.record?.avgGain != null ? signed(s.record.avgGain) : "–", s.record?.avgGain != null ? (s.record.avgGain > 0 ? "text-good" : s.record.avgGain < 0 ? "text-bad" : "") : ""],
+    ["Confidence", <span key="c" className="flex items-center gap-1.5" title="How much their view counts against the market's, from past calls on this token"><ConfidenceMeter value={cred} />{Math.round(cred * 100)}%</span>],
   ];
   const m = s.picked?.pick ?? null;
   return (
@@ -200,16 +231,16 @@ function SidePanel({ s, symbol, ladder, leads, loading, unavailable }: { s: Side
         <Avatar account={s.account} className="size-9 text-xs" />
         <div className="min-w-0 flex-1">
           <div className="truncate font-semibold">{s.account.name}</div>
-          <div className="truncate text-xs text-muted-foreground">{s.account.handle}</div>
+          <div className="truncate text-xs text-muted-foreground">{s.account.handle} · {s.stance.posts} {s.stance.posts === 1 ? "post" : "posts"} on {symbol} this week</div>
         </div>
         {leads && <span className="shrink-0 rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[11px] font-medium">Better record</span>}
       </div>
 
-      <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm">
-        {rows.map(([k, v]) => (
-          <div key={k} className="contents">
-            <dt className="text-muted-foreground">{k}</dt>
-            <dd className="flex items-center justify-end font-medium tabular-nums">{v}</dd>
+      <dl className="grid grid-cols-3 gap-2">
+        {stats.map(([k, v, tone]) => (
+          <div key={k} className="grid gap-0.5 rounded-lg bg-foreground/[0.04] px-3 py-2">
+            <dt className="text-[11px] text-muted-foreground">{k}</dt>
+            <dd className={`flex items-center text-base font-semibold tabular-nums ${tone ?? ""}`}>{v}</dd>
           </div>
         ))}
       </dl>
@@ -218,91 +249,22 @@ function SidePanel({ s, symbol, ladder, leads, loading, unavailable }: { s: Side
         <div className={label}>Best contract</div>
         {m && ladder ? (
           <>
-            <div className="flex items-baseline justify-between gap-2">
-              <div className="flex items-baseline gap-2">
-                <span className={`rounded-md px-2 py-0.5 text-sm font-semibold ${m.side === "yes" ? "bg-good-soft text-good" : "bg-bad-soft text-bad"}`}>{m.side === "yes" ? "Yes" : "No"}</span>
-                <span className="text-xl font-semibold tabular-nums">{cents(m.price)}</span>
-              </div>
-              <span className="text-xs text-muted-foreground">pays $1 · <span className="font-medium text-foreground">{(1 / m.price).toFixed(1)}×</span></span>
-            </div>
+            <ContractTicket symbol={symbol} ladder={ladder} side={m.side} rung={m.rung} price={m.price} current={current} live={live}
+              cta={`Buy ${m.side === "yes" ? "Yes" : "No"} at ${cents(m.price)} on Gemini`} />
             <div className="text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">{symbol} {m.rung.label}</span> · {shortWhen(ladder.expiry)}
-              {" "}· their odds <span className="font-medium text-foreground">{pct(m.accountChance)}</span> vs market {pct(m.marketChance)}
+              Their odds <span className="font-medium text-foreground">{pct(m.accountChance)}</span> vs market {pct(m.marketChance)}
             </div>
-            <div className="truncate text-xs text-muted-foreground" title={m.target?.quote}>
-              {m.target
-                ? <>Based on <span className="font-medium text-foreground">{usd(m.target.price)}</span> <span className="italic">&ldquo;{m.target.quote}&rdquo;</span></>
-                : "No price level named; uses the lean and typical move."}
-            </div>
-            {/* Solid call to action naming the exact bet, with Gemini's mark; lifts slightly on hover. */}
-            <a href={geminiUrl(ladder)} target="_blank" rel="noreferrer"
-              className="group mt-1 flex h-10 items-center justify-center gap-2 rounded-[12px] bg-foreground px-4 text-sm font-semibold text-background shadow-sm outline-none transition hover:-translate-y-px hover:shadow-md hover:opacity-95 focus-visible:ring-2 focus-visible:ring-ring active:translate-y-0">
-              <span className="grid size-5 place-items-center rounded-full bg-background text-foreground"><GeminiLogo className="size-3" /></span>
-              Buy {m.side === "yes" ? "Yes" : "No"} at {cents(m.price)} on Gemini
-              <ArrowUpRight className="size-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" strokeWidth={2.25} aria-hidden="true" />
-            </a>
+            <SourceTweet account={s.account} pick={m} symbol={symbol} />
           </>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            {!s.side ? "No clear lean to match." : loading ? "Checking Gemini's odds…" : unavailable ? "Gemini's prediction markets aren't responding right now." : s.picked?.reason ?? `No live ${symbol} contract on that side.`}
-          </p>
+          <ContractTicketEmpty
+            title={!s.side ? "No side to take" : loading ? "Checking Gemini's odds…" : unavailable ? "Gemini isn't responding" : s.picked?.reason?.startsWith("The market already") ? "Already priced in" : `No ${symbol} contract`}
+            body={!s.side ? (s.stance.score === null ? `No ${symbol} posts this week.` : `Their ${symbol} posts are split.`) : loading ? "One moment." : unavailable ? "Try again in a minute." : s.picked?.reason?.startsWith("The market already") ? `Gemini's odds already match their view on this date, so no contract has an edge.` : s.picked?.reason ?? `No live ${symbol} contract on that side.`}>
+            {!loading && !unavailable && <OtherMarkets others={s.others} leaning={s.leaning} onLadder={onLadder} onCoin={onCoin} />}
+          </ContractTicketEmpty>
         )}
       </div>
     </div>
   );
 }
 
-/**
- * One button for the coin being compared. It opens a list of every coin with how many posts each person made about
- * it this week, so you can see before picking whether there is anything to compare.
- */
-function TokenMenu({ value, onPick, people, counts }: {
-  value: TokenSymbol; onPick: (t: TokenSymbol) => void; people: [string, string];
-  counts: (readonly [TokenSymbol, number, number])[];
-}) {
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("pointerdown", away);
-    document.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", esc); };
-  }, [open]);
-  const icon = (t: TokenSymbol, dim = false) => (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={`/tokens/${t.toLowerCase()}.svg`} alt="" className={`size-4 shrink-0 ${dim ? "opacity-50 grayscale" : ""}`} />
-  );
-  return (
-    <div ref={box} className="relative">
-      <button type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}
-        className="flex h-9 items-center gap-2 rounded-[12px] border border-border bg-card px-3 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
-        {icon(value)}{value}<span className="font-normal text-muted-foreground">{TOKEN_NAMES[value]}</span>
-        <ChevronDown className={`size-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
-      </button>
-      {open && (
-        <div role="listbox" aria-label="Coin to compare"
-          className="absolute top-full left-0 z-30 mt-2 grid w-[22rem] max-w-[calc(100vw-48px)] gap-0.5 rounded-xl border border-border bg-popover p-1.5 shadow-[var(--shadow-floating)]">
-          {counts.map(([t, na, nb]) => {
-            const none = na === 0 && nb === 0;
-            const who = (name: string, n: number) => <span className={n ? "text-foreground" : ""}>{name} {n || "–"}</span>;
-            return (
-              <button key={t} type="button" role="option" aria-selected={t === value} onClick={() => { onPick(t); setOpen(false); }}
-                className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted ${t === value ? "bg-muted" : ""}`}>
-                {icon(t, none)}
-                <span className={`grid min-w-0 flex-1 ${none ? "text-muted-foreground" : ""}`}>
-                  <span className="font-medium">{t} <span className="font-normal text-muted-foreground">{TOKEN_NAMES[t]}</span></span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {none ? "Neither posted about it this week" : <>Posts this week: {who(people[0], na)} · {who(people[1], nb)}</>}
-                  </span>
-                </span>
-                {t === value && <Check className="size-4 shrink-0" aria-hidden="true" />}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}

@@ -2,16 +2,19 @@
 //
 // 1. Target: where the account thinks price is going, from levels it named in its posts (lib/targets),
 //    or, with none, its typical move from its track record.
-// 2. The account's odds: the market's odds curve shifted toward that target, by how strongly the account leans.
+// 2. The account's odds: the market's odds curve shifted toward that target, by how strongly the account leans and
+//    by how much time is left before the contract settles (a call is judged over HORIZON_DAYS; a contract settling
+//    in a few hours only gets a small part of that move).
 // 3. Credibility: those odds blended with the market's, weighted by how often the account has been right on this token.
 // 4. Each contract on the lean's side is scored by Kelly growth (the long-run growth rate from betting the Kelly
 //    fraction at those odds). Kelly weighs edge against the chance of winning, so it doesn't just chase long shots.
+//    Contracts the account or the market gives less than MIN_CHANCE are skipped as long shots.
 //    No contract with a positive edge means no pick.
 import type { Ladder, Match, Rung } from "./gemini";
 import type { Post } from "./sample";
 import type { TokenSymbol } from "./stance";
 import { extractTargets, type Target } from "./targets";
-import type { Tally } from "./track";
+import { HORIZON_DAYS, type Tally } from "./track";
 
 export type Candidate = Match & {
   /** Chance the contract pays, by the account's view (after credibility). */
@@ -46,6 +49,7 @@ export type PickResult = { pick: Pick | null; reason?: string; targets: Target[]
 
 /** Smallest win chance worth showing; below this a pick is a lottery ticket whatever its edge. */
 const MIN_CHANCE = 0.12;
+const DAY = 86_400_000;
 /** Credibility for an account with no judged calls: it moves the odds a little, never a lot. */
 const PRIOR_CREDIBILITY = 0.3;
 
@@ -91,9 +95,12 @@ export function bestContract(input: {
   const typical = Math.max(0.03, Math.abs(record?.avgGain ?? 0));
   const T = total > 0 ? sideTargets.reduce((s, t) => s + t.price * t.weight, 0) / total : E * (lean === "bearish" ? 1 - typical : 1 + typical);
 
-  // 2. The account's centre moves from the market's toward the target by its conviction.
+  // 2. The account's centre moves from the market's toward the target by its conviction, scaled down when the
+  //    contract settles sooner than a call's horizon (price moves grow with the square root of time).
   const conviction = Math.min(1, Math.abs(score - 50) / 50);
-  const accountPrice = E + conviction * (T - E);
+  const left = Math.max(0, new Date(ladder.expiry).getTime() - now);
+  const timeScale = Number.isFinite(left) ? Math.sqrt(Math.min(1, left / (HORIZON_DAYS * DAY))) : 1;
+  const accountPrice = E + conviction * timeScale * (T - E);
   const shift = accountPrice - E;
 
   // 3. Credibility from the hit rate (see credibilityOf).
@@ -108,7 +115,7 @@ export function bestContract(input: {
     if (price === null || price <= 0 || price >= 1) continue;
     const p = side === "yes" ? above : 1 - above;
     const marketChance = side === "yes" ? r.chance : 1 - r.chance;
-    if (p < MIN_CHANCE) continue;
+    if (p < MIN_CHANCE || marketChance < MIN_CHANCE) continue;
     const edge = p - price;
     if (edge <= 0) continue;
     const b = (1 - price) / price;
