@@ -9,7 +9,6 @@ type RawContract = {
 };
 type RawEvent = { ticker: string; title: string; expiryDate: string; contracts: RawContract[] };
 
-import { geminiMock, mockEvents } from "./gemini-mock";
 
 const num = (s?: string) => (s === undefined ? null : Number(s));
 
@@ -26,7 +25,7 @@ function expectedPrice(rungs: Rung[]): number | null {
 }
 
 export async function ladders(symbol: string): Promise<Ladder[]> {
-  const events: RawEvent[] = geminiMock ? mockEvents(symbol) : await fetchEvents(symbol);
+  const events = await fetchEvents(symbol);
   return shape(symbol, events);
 }
 

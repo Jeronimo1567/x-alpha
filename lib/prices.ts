@@ -1,14 +1,12 @@
 // Hourly price history from Gemini's public candles API (about 60 days back). No key needed.
 import { TOKENS, type TokenSymbol } from "./stance";
 import type { PriceSeries } from "./track";
-import { geminiMock, mockPrices } from "./gemini-mock";
 
 const TTL_MS = 5 * 60_000;
 const cache = new Map<TokenSymbol, { at: number; series: PriceSeries }>();
 
 /** [hour start in ms, closing price] pairs, oldest first. Cached for 5 minutes. */
 export async function hourlyPrices(symbol: TokenSymbol): Promise<PriceSeries> {
-  if (geminiMock) return mockPrices(symbol);
   const hit = cache.get(symbol);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.series;
   const res = await fetch(`https://api.gemini.com/v2/candles/${symbol.toLowerCase()}usd/1hr`, { cache: "no-store" });
