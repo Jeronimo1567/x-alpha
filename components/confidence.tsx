@@ -34,12 +34,14 @@ export function Confidence({ record, calls, symbol }: { record: Tally | null; ca
   const share = `${Math.round(value * 100)}%`;
 
   return (
-    <div className="grid gap-2 rounded-md bg-foreground/[0.03] p-2.5" aria-label={`Confidence: ${level}, ${share}`}>
-      <div className="flex items-center justify-between gap-2">
-        <span className={label}>Confidence from past calls</span>
-        <span className="flex items-center gap-2">
+    <div className="grid gap-2 rounded-md bg-foreground/[0.03] p-3" aria-label={`Confidence: ${level}, ${share}`}>
+      <span className={label}>Confidence from past calls</span>
+      {/* The percentage leads, big; the level and meter sit beside it. */}
+      <div className="flex items-center gap-3">
+        <span className="text-3xl leading-none font-semibold tabular-nums">{share}</span>
+        <span className="flex items-center gap-2 rounded-md bg-foreground/[0.06] px-2 py-1">
           <ConfidenceMeter value={value} />
-          <span className="text-sm font-semibold tabular-nums">{level} · {share}</span>
+          <span className="text-sm font-semibold">{level}</span>
         </span>
       </div>
       {judged.length > 0 && (

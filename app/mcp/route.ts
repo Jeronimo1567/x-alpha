@@ -3,14 +3,15 @@
 import { ladders, matchContract, type Ladder } from "@/lib/gemini";
 import { cleanAvatar, cleanHandle, cleanPosts, getReading, saveReading, toAccount, type Reading } from "@/lib/readings";
 import { allPrices } from "@/lib/prices";
-import { lean, stances, TOKENS } from "@/lib/stance";
+import { lean, stances, TOKEN_NAMES, TOKENS } from "@/lib/stance";
 import { bestContract } from "@/lib/pick";
 import { HORIZON_DAYS, trackRecord } from "@/lib/track";
 
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const round = (n: number | null, d = 2) => (n === null ? null : Number(n.toFixed(d)));
 
-const symbolProp = { type: "string", enum: [...TOKENS], description: "Token symbol." };
+const COINS = TOKENS.map((t) => `${t} (${TOKEN_NAMES[t]})`).join(", ");
+const symbolProp = { type: "string", enum: [...TOKENS], description: `Token symbol: ${COINS}.` };
 const horizonProp = {
   type: "string", enum: ["soonest", "longest"],
   description: "Which open market to use: the one that settles soonest, or the longest-dated one (usually month-end). Default: longest.",
@@ -22,7 +23,7 @@ const postItem = {
     text: { type: "string", description: "The post's text." },
     posted_at: { type: "string", description: "When it was posted, ISO 8601." },
     url: { type: "string", description: "Link to the post on X." },
-    token: { type: ["string", "null"], enum: [...TOKENS, null], description: "Token the post is about, or null if none of these." },
+    token: { type: ["string", "null"], enum: [...TOKENS, null], description: `Token the post is about: ${COINS}. Use null for any other coin or topic.` },
     stance: { type: "string", enum: ["bullish", "bearish", "neutral"], description: "The author's lean on that token in this post." },
     strength: { type: "number", minimum: 0, maximum: 1, description: "How strongly the post leans. 0.2 is a passing remark, 0.9 is a clear call." },
   },
@@ -33,7 +34,7 @@ const TOOLS = [
   {
     name: "save_account_reading",
     description:
-      "Send X Alpha your reading of an X account. First read the account's posts from the last 7 days on X yourself, then call this once with every post, each labelled with the token it is about and whether the author sounds bullish, bearish or neutral. X Alpha stores it, shows it on the dashboard, and returns the account's lean per token with the matching live Gemini prediction contract.",
+      `Send X Alpha your reading of an X account. First read the account's posts from the last 7 days on X yourself, then call this once with every post, each labelled with the token it is about (${COINS}, or null) and whether the author sounds bullish, bearish or neutral. X Alpha stores it, shows it on the dashboard, and returns the account's lean per token with the matching live Gemini prediction contract.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -173,8 +174,8 @@ async function handle(msg: Rpc, ctx: { canWrite: boolean; origin: string }) {
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: {} },
-        serverInfo: { name: "x-alpha", version: "0.2.0" },
-        instructions: "X Alpha turns an X account's recent posts into a lean per crypto token and matches it to live Gemini prediction market odds. Read the account on X, then call save_account_reading. Nothing here places trades.",
+        serverInfo: { name: "x-alpha", version: "0.3.0" },
+        instructions: `X Alpha turns an X account's recent posts into a lean per crypto token (${COINS}) and matches it to live Gemini prediction market odds. Read the account on X, then call save_account_reading. Nothing here places trades.`,
       });
     }
     case "ping": return reply({});

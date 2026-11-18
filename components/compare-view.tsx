@@ -50,9 +50,9 @@ function Lean({ s }: { s: Side }) {
  * Two accounts side by side on one token: their leans, their track records, both sets of calls on one price
  * line, and the Gemini contract each lean points to, on a shared settle date.
  */
-export function CompareView({ accounts, prices, initialA }: { accounts: Account[]; prices: Partial<Record<TokenSymbol, PriceSeries>> | null; initialA: string }) {
+export function CompareView({ accounts, prices, initialA, initialB }: { accounts: Account[]; prices: Partial<Record<TokenSymbol, PriceSeries>> | null; initialA: string; initialB?: string }) {
   const [aHandle, setA] = useState(initialA);
-  const [bHandle, setB] = useState(() => accounts.find((x) => x.handle !== initialA)?.handle ?? initialA);
+  const [bHandle, setB] = useState(() => (initialB && initialB !== initialA ? initialB : accounts.find((x) => x.handle !== initialA)?.handle ?? initialA));
   const a = accounts.find((x) => x.handle === aHandle) ?? accounts[0];
   const b = accounts.find((x) => x.handle === bHandle && x.handle !== a.handle) ?? accounts.find((x) => x.handle !== a.handle) ?? a;
 
@@ -105,16 +105,29 @@ export function CompareView({ accounts, prices, initialA }: { accounts: Account[
   return (
     <>
       <section className={`${card} grid gap-5`} aria-label="Compare accounts">
-        <div className="grid items-center gap-3 md:grid-cols-[1fr_auto_1fr]">
-          <div style={accountChips}>
-            <ChipGroup label="First account" multiple={false} options={accountOptions(b.handle)} value={[a.handle]}
-              onValueChange={(v) => { if (v[0]) { setA(v[0]); reset(); } }} />
-          </div>
-          <span className="justify-self-center font-mono text-xs tracking-wider text-muted-foreground uppercase">vs</span>
-          <div style={accountChips} className="md:justify-self-end">
-            <ChipGroup label="Second account" multiple={false} options={accountOptions(a.handle)} value={[b.handle]}
-              onValueChange={(v) => { if (v[0]) { setB(v[0]); reset(); } }} />
-          </div>
+        {/* Face-off: big profile pictures with VS between them; under each, the name and their current position
+            on this token from their posts. The chips to swap accounts only show when there are others to pick. */}
+        <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-3 sm:gap-6">
+          {([[A, "First account", accountOptions(b.handle), a.handle, setA], [B, "Second account", accountOptions(a.handle), b.handle, setB]] as const).map(([s, which, options, value, set], n) => (
+            <div key={which} className={`grid justify-items-center gap-3 text-center ${n === 1 ? "col-start-3" : ""}`}>
+              <Avatar account={s.account} className="size-20 text-2xl ring-2 ring-foreground/10 sm:size-28 sm:text-3xl" />
+              <div className="grid min-w-0 gap-0.5">
+                <span className="truncate text-lg font-semibold">{displayName(s.account)}</span>
+                <span className="truncate text-xs text-muted-foreground">{s.account.handle}</span>
+              </div>
+              <div className="grid justify-items-center gap-1">
+                <span className={label}>Position on {symbol}</span>
+                <span className="text-base"><Lean s={s} /></span>
+              </div>
+              {accounts.length > 2 && (
+                <div style={accountChips} className="flex justify-center [&_[role=group]]:justify-center [&_[role=group]>div]:justify-center">
+                  <ChipGroup label={which} multiple={false} options={options} value={[value]}
+                    onValueChange={(v) => { if (v[0]) { set(v[0]); reset(); } }} />
+                </div>
+              )}
+            </div>
+          ))}
+          <span className="col-start-2 row-start-1 mt-[22px] self-start text-3xl leading-9 font-bold tracking-tight text-muted-foreground sm:mt-8 sm:text-5xl sm:leading-[48px]">VS</span>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">

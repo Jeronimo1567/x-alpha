@@ -9,6 +9,8 @@ type RawContract = {
 };
 type RawEvent = { ticker: string; title: string; expiryDate: string; contracts: RawContract[] };
 
+import { geminiMock, mockEvents } from "./gemini-mock";
+
 const num = (s?: string) => (s === undefined ? null : Number(s));
 
 /** Price where the market sees a 50% chance of finishing above. */
@@ -24,11 +26,18 @@ function expectedPrice(rungs: Rung[]): number | null {
 }
 
 export async function ladders(symbol: string): Promise<Ladder[]> {
+  const events: RawEvent[] = geminiMock ? mockEvents(symbol) : await fetchEvents(symbol);
+  return shape(symbol, events);
+}
+
+async function fetchEvents(symbol: string): Promise<RawEvent[]> {
   const url = `https://api.gemini.com/v1/prediction-markets/events?status=active&category=Crypto&limit=100&search=${encodeURIComponent(symbol)}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`Gemini returned ${res.status}`);
-  const events: RawEvent[] = (await res.json()).data ?? [];
+  return (await res.json()).data ?? [];
+}
 
+function shape(symbol: string, events: RawEvent[]): Ladder[] {
   // Keep the hourly, daily and month-end ladders. Skip the 5 and 15 minute ones.
   const plain = new RegExp(`^${symbol}\\d{10}$`);
   return events

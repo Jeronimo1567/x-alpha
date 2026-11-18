@@ -1,3 +1,5 @@
+import type { TokenSymbol } from "./stance";
+
 // SAMPLE DATA. These accounts and posts are invented so the app can be built and
 // demoed before the X feed is connected. No real person wrote any of this.
 // Real version: fetch an account's recent posts with the xAI API's X search tool
@@ -13,7 +15,7 @@ export type Post = {
   text: string;
   url?: string;
   /** Token the post is about, or null if it is not about a tradeable token. */
-  token: "BTC" | "ETH" | "SOL" | "XRP" | null;
+  token: TokenSymbol | null;
   stance: Stance;
   /** How strongly the post leans, 0 to 1. */
   strength: number;

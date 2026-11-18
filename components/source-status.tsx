@@ -7,11 +7,11 @@ import { HoverCard } from "@/components/arc/hover-card/hover-card";
 export type SourceState = "live" | "sample" | "loading" | "error";
 export type SourceRow = { label: string; value: ReactNode };
 
-const STATE: Record<SourceState, { text: string; dot: string; ring: string }> = {
-  live: { text: "Live", dot: "bg-good", ring: "outline-good outline-solid" },
-  sample: { text: "Sample data", dot: "bg-muted-foreground", ring: "outline-muted-foreground/60 outline-dashed opacity-60" },
-  loading: { text: "Loading", dot: "bg-muted-foreground animate-pulse", ring: "outline-muted-foreground/60 outline-dashed opacity-60" },
-  error: { text: "Not loading", dot: "bg-bad", ring: "outline-bad/70 outline-dashed" },
+const STATE: Record<SourceState, { text: string; dot: string }> = {
+  live: { text: "Live", dot: "bg-good" },
+  sample: { text: "Sample data", dot: "bg-muted-foreground" },
+  loading: { text: "Loading", dot: "bg-muted-foreground animate-pulse" },
+  error: { text: "Not loading", dot: "bg-bad" },
 };
 
 /** "just now", "4 min ago", "2 h ago", "3 d ago". */
@@ -60,9 +60,15 @@ export function SourceStatus({ name, logo, state, rows }: { name: string; logo: 
   );
   return (
     <HoverCard content={card} side="bottom" align="end" openDelay={180} className="w-[20rem]! max-w-[calc(100vw-24px)]!">
+      {/* Same box as the theme toggle beside it (38px, 12px corners, card background, hairline border);
+          the source's state is the dot in the corner. */}
       <button type="button" aria-label={`${name}: ${s.text}`}
-        className={`grid size-9 place-items-center rounded-full bg-neutral-950 text-white outline-2 outline-offset-2 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring ${s.ring}`}>
-        {logo}
+        className="relative grid size-[38px] place-items-center rounded-[12px] border border-border bg-card text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
+        <span className={state === "sample" || state === "loading" ? "opacity-60" : undefined}>{logo}</span>
+        <span className="absolute -top-0.5 -right-0.5 flex size-2.5 rounded-full ring-2 ring-background" aria-hidden="true">
+          {state === "live" && !reduced && <span className="absolute inset-0 animate-ping rounded-full bg-good opacity-60" />}
+          <span className={`relative size-2.5 rounded-full ${s.dot}`} />
+        </span>
       </button>
     </HoverCard>
   );

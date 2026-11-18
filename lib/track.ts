@@ -80,3 +80,39 @@ export function trackRecord(posts: Post[], prices: Partial<Record<TokenSymbol, P
     byToken: TOKENS.map((token) => ({ token, ...summarize(calls.filter((c) => c.token === token)) })),
   };
 }
+
+/**
+ * Running total of what following each call would have returned, oldest call first, in percent.
+ * Starts at 0 so even one call draws a line. Open calls count at today's price.
+ */
+export function followCurve(calls: Call[]): { values: number[]; dates: number[] } {
+  const ordered = [...calls].sort((a, b) => a.postedAt - b.postedAt);
+  const values = [0], dates = [ordered[0]?.postedAt ?? Date.now()];
+  for (const c of ordered) { values.push(values[values.length - 1] + c.gain * 100); dates.push(c.postedAt); }
+  return { values, dates };
+}
+
+/**
+ * The account's lean on one token at the end of each of the last `days` days: 0 fully bearish, 50 neutral,
+ * 100 fully bullish. Each day uses the same rule as the headline lean (posts from the 7 days before it, each
+ * counting half as much every 3 days), so the last point matches the lean shown elsewhere. Days before the first
+ * post on the token are null.
+ */
+export function leanHistory(posts: Post[], token: TokenSymbol, days = 14, now = Date.now()): { values: (number | null)[]; dates: number[] } {
+  const about = posts.filter((p) => p.token === token).map((p) => ({ p, at: postTime(p, now) }));
+  const values: (number | null)[] = [], dates: number[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const end = i === 0 ? now : (() => { const d = new Date(now - i * DAY); d.setUTCHours(23, 59, 59, 999); return d.getTime(); })();
+    let total = 0, lean = 0;
+    for (const { p, at } of about) {
+      const age = (end - at) / DAY;
+      if (age < 0 || age >= 7) continue;
+      const w = p.strength * Math.pow(0.5, age / 3);
+      total += w;
+      lean += w * (p.stance === "bullish" ? 1 : p.stance === "bearish" ? -1 : 0);
+    }
+    values.push(total ? 50 + 50 * (lean / total) : null);
+    dates.push(end);
+  }
+  return { values, dates };
+}

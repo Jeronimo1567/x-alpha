@@ -1,8 +1,10 @@
 import type { Account, Post } from "./sample";
 
-export const TOKENS = ["BTC", "ETH", "SOL", "XRP"] as const;
+/** Every coin Gemini runs crypto price prediction markets for. Adding one here adds it everywhere: Grok's prompt,
+ *  the MCP tools, saving readings, prices, odds and the UI (plus an icon in public/tokens/). */
+export const TOKENS = ["BTC", "ETH", "SOL", "XRP", "ZEC", "HYPE"] as const;
 export type TokenSymbol = (typeof TOKENS)[number];
-export const TOKEN_NAMES: Record<TokenSymbol, string> = { BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", XRP: "XRP" };
+export const TOKEN_NAMES: Record<TokenSymbol, string> = { BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", XRP: "XRP", ZEC: "Zcash", HYPE: "Hyperliquid" };
 
 /** A post counts half as much every 3 days. */
 const HALF_LIFE_DAYS = 3;

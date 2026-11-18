@@ -1,15 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Avatar } from "@/components/account-avatar";
 import { GeminiLogo, GrokBotLogo } from "@/components/brand-logos";
 import { ChipGroup } from "@/components/arc/chip-group/chip-group";
 import SegmentedControl from "@/components/arc/segmented-control/segmented-control";
+import { CompareTable } from "@/components/compare-table";
 import { CompareView } from "@/components/compare-view";
+import { Dashboard } from "@/components/dashboard";
 import { Confidence } from "@/components/confidence";
 import { Market } from "@/components/market";
 import { PriceCallsChart } from "@/components/price-calls-chart";
 import { since, SourceStatus } from "@/components/source-status";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { XAlphaLogo } from "@/components/x-alpha-logo";
 import { DAY_MS, OddsState, Tag, card, cents, clock, date, geminiUrl, label, neutralAccent, pct, sideOf, signed, stamp, usd, useOdds, when, displayName } from "@/components/shared";
 
@@ -34,15 +37,21 @@ export default function Page() {
     const t = setInterval(tick, 30_000);
     return () => { clearTimeout(first); clearInterval(t); };
   }, []);
+  const loadReadings = useCallback(() => {
+    fetch("/api/readings").then((r) => r.json()).then((b) => { if (Array.isArray(b.accounts)) setFromGrok(b.accounts); }).catch(() => {});
+  }, []);
   useEffect(() => {
     let live = true;
-    fetch("/api/readings").then((r) => r.json()).then((b) => { if (live && Array.isArray(b.accounts)) setFromGrok(b.accounts); }).catch(() => {});
+    loadReadings();
     fetch("/api/prices").then((r) => r.json()).then((b) => { if (live) { setPrices(b.prices ?? {}); setPricesAt(Date.now()); } }).catch(() => { if (live) setPrices({}); });
     return () => { live = false; };
-  }, []);
+  }, [loadReadings]);
 
   const [chosen, setChosen] = useState<string | null>(null);
-  const [mode, setMode] = useState<"account" | "compare">("account");
+  const [mode, setMode] = useState<"dashboard" | "account" | "compare">("dashboard");
+  // Profiles ticked on the dashboard, and the two of them in the head-to-head. Null: compare across every account.
+  const [compareSet, setCompareSet] = useState<string[] | null>(null);
+  const [pair, setPair] = useState<[string, string] | null>(null);
   const [picked, setPicked] = useState<TokenSymbol | null>(null);
   const [ladderIndex, setLadderIndex] = useState<number | null>(null);
 
@@ -75,10 +84,15 @@ export default function Page() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
           <h1><XAlphaLogo className="h-8 w-auto" title="X Alpha" /></h1>
-          <SegmentedControl label="View" value={mode} onValueChange={(v) => setMode(v as "account" | "compare")}
-            options={[{ value: "account", label: "Account" }, { value: "compare", label: "Compare" }]} />
+          {/* No frame around the tabs; only the chosen tab gets a box, the same as the theme toggle (38px, 12px corners,
+              card background, hairline border). Arc rounds the tab 4px less than --radius-control, hence 16px. */}
+          <span className="flex" style={{ "--radius-control": "16px", "--control-height-sm": "38px", "--surface": "var(--card)" } as React.CSSProperties}>
+            <SegmentedControl label="View" className="border-0! bg-transparent! [&>div]:p-0!" value={mode} onValueChange={(v) => { setMode(v as typeof mode); if (v === "compare") { setCompareSet(null); setPair(null); } }}
+              options={[{ value: "dashboard", label: "Dashboard" }, { value: "account", label: "Account" }, { value: "compare", label: "Compare" }]} />
+          </span>
         </div>
-        <div className="flex gap-3">
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
           <SourceStatus name="Grok Bot" logo={<GrokBotLogo className="size-5" />}
             state={isSample ? "sample" : "live"}
             rows={isSample ? [
@@ -100,7 +114,16 @@ export default function Page() {
         </div>
       </header>
 
-      {mode === "compare" ? (
+      {mode === "dashboard" ? (
+        <Dashboard accounts={accounts} prices={prices} now={now} onSaved={loadReadings}
+          onOpen={(h) => { setChosen(h); setPicked(null); setLadderIndex(null); setMode("account"); }}
+          onCompare={(hs) => { setCompareSet(hs); setPair([hs[0], hs[1]]); setMode("compare"); }} />
+      ) : mode === "compare" && compareSet && pair ? (<>
+        {compareSet.length > 2 && (
+          <CompareTable now={now} accounts={accounts.filter((a) => compareSet.includes(a.handle))} prices={prices} pair={pair} onPair={setPair} />
+        )}
+        <CompareView key={pair.join()} accounts={accounts.filter((a) => compareSet.includes(a.handle))} prices={prices} initialA={pair[0]} initialB={pair[1]} />
+      </>) : mode === "compare" ? (
         <CompareView key={account.handle} accounts={accounts} prices={prices} initialA={account.handle} />
       ) : (<>
       {/* Accounts Grok Bot read stay in view; the invented samples fold behind "+N more". */}
@@ -273,8 +296,8 @@ function ContractCard({ symbol, stance, handle, result, ladder, odds, record, ca
   const yes = match.side === "yes";
   const tone = yes ? "bg-good" : "bg-bad";
   const odd = (name: string, value: number, fill: string) => (
-    <div className="grid grid-cols-[4.5rem_1fr_2.5rem] items-center gap-2 text-xs">
-      <span className="text-muted-foreground">{name}</span>
+    <div className="grid grid-cols-[6.5rem_1fr_2.5rem] items-center gap-2 text-xs">
+      <span className="truncate text-muted-foreground">{name}</span>
       <span className="h-1.5 rounded-full bg-foreground/[0.07]"><span className={`block h-1.5 rounded-full ${fill}`} style={{ width: pct(value) }} /></span>
       <span className="text-right font-mono tabular-nums">{pct(value)}</span>
     </div>
@@ -284,16 +307,19 @@ function ContractCard({ symbol, stance, handle, result, ladder, odds, record, ca
       {head}
       <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
       <div className="grid content-start gap-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <div className="flex items-baseline gap-2">
-          <span className={`rounded-md px-2 py-0.5 text-sm font-semibold ${yes ? "bg-good-soft text-good" : "bg-bad-soft text-bad"}`}>{yes ? "Yes" : "No"}</span>
-          <span className="text-2xl font-semibold tabular-nums">{cents(match.price)}</span>
+      {/* The contract itself, highlighted in its side's colour: the side and its share price at the same size. */}
+      <div className={`grid gap-2 rounded-md p-3 ring-1 ${yes ? "bg-good-soft/40 ring-good/30" : "bg-bad-soft/40 ring-bad/30"}`}>
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <div className="flex items-center gap-2 text-2xl leading-9 font-semibold">
+            <span className={`rounded-md px-2 ${yes ? "bg-good-soft text-good" : "bg-bad-soft text-bad"}`}>{yes ? "Yes" : "No"}</span>
+            <span className="tabular-nums">{cents(match.price)}</span>
+          </div>
+          <span className="text-2xl leading-9 font-semibold tabular-nums" title={`Pays $1 per share if right: ${(1 / match.price).toFixed(1)}× what you paid`}>{(1 / match.price).toFixed(1)}×</span>
         </div>
-        <span className="text-xs text-muted-foreground">pays $1 if right · <span className="font-medium text-foreground">{(1 / match.price).toFixed(1)}×</span></span>
-      </div>
-      <div className="text-sm leading-snug">
-        <span className="font-medium">{symbol} {match.rung.label}</span>
-        <span className="text-muted-foreground"> · settles {when(ladder.expiry)}</span>
+        <div className="text-sm leading-snug">
+          <span className="font-medium">{symbol} {match.rung.label}</span>
+          <span className="text-muted-foreground"> · settles {when(ladder.expiry)}</span>
+        </div>
       </div>
 
       <Confidence record={record} calls={calls} symbol={symbol} />
@@ -301,10 +327,11 @@ function ContractCard({ symbol, stance, handle, result, ladder, odds, record, ca
 
       <div className="grid content-start gap-3">
       <div className="grid gap-1.5">
-        {odd(handle.length > 12 ? "Their view" : handle, match.accountChance, tone)}
-        {odd("Market", match.marketChance, "bg-foreground/40")}
+        {/* Chance this contract pays: by the account's view, then by Gemini's market. */}
+        {odd(handle.length > 9 ? "Their odds" : `${handle}'s odds`, match.accountChance, tone)}
+        {odd("Market's odds", match.marketChance, "bg-foreground/40")}
         <div className="text-xs text-muted-foreground">
-          Edge <span className="font-medium text-foreground tabular-nums">+{Math.round(match.edge * 100)}¢</span> per $1
+          If {handle.length > 12 ? "they're" : `${handle} is`} right: <span className="font-medium text-foreground tabular-nums">+{Math.round(match.edge * 100)}¢</span> expected per $1 share
         </div>
       </div>
 
