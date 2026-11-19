@@ -39,7 +39,8 @@ async function main(stream) {
         const usd = Math.abs(Number(quote) / 10 ** pool.quoteDec);
         if (usd < minUsd) continue;
         swaps.push({
-          sig: receipt.transactionHash, time, token: pool.token, chain: "ethereum", wallet: receipt.from,
+          // One transaction can hold several swaps (a multi-hop route): the log index keeps each one separate.
+          sig: `${receipt.transactionHash}:${parseInt(log.logIndex, 16) || 0}`, time, token: pool.token, chain: "ethereum", wallet: receipt.from,
           // The pool paying out the base token (negative) means the trader bought it.
           side: base < 0n ? "buy" : "sell", amount: Math.abs(Number(base) / 10 ** pool.baseDec), usd,
         });

@@ -9,6 +9,8 @@
 // MIN_USD can be changed without editing this code: put a number in the Key-Value Store under "xalpha-min-usd".
 
 const WSOL = "So11111111111111111111111111111111111111112";
+/** Implied SOL prices outside this range mean the trade wasn't SOL against dollars. */
+const MIN_PRICE = 10, MAX_PRICE = 2000;
 const STABLES = {
   EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: "USDC",
   Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: "USDT",
@@ -51,6 +53,12 @@ function readSwap(tx, block, minUsd) {
   add(meta.preTokenBalances, -1);
   add(meta.postTokenBalances, +1);
 
+  // Only SOL and dollars may move: a trader selling some other token for USDC also spends a little SOL on fees and
+  // tips, and that must not read as a SOL sale.
+  for (const mint in delta) {
+    if (mint !== WSOL && !STABLES[mint] && Math.abs(delta[mint]) > 1e-9) return null;
+  }
+
   let usd = 0;
   for (const mint in STABLES) usd += delta[mint] || 0;
   // Native SOL with the fee added back, plus wrapped SOL.
@@ -58,6 +66,9 @@ function readSwap(tx, block, minUsd) {
 
   // A swap moves SOL and dollars in opposite directions.
   if (Math.abs(usd) < minUsd || Math.abs(sol) < 1e-6 || Math.sign(usd) === Math.sign(sol)) return null;
+  // The implied price must be a believable SOL price, or SOL wasn't really the other side of the trade.
+  const price = Math.abs(usd / sol);
+  if (price < MIN_PRICE || price > MAX_PRICE) return null;
   return {
     sig: tx.transaction.signatures && tx.transaction.signatures[0], time: block.blockTime,
     token: "SOL", chain: "solana", wallet, side: sol > 0 ? "buy" : "sell", amount: Math.abs(sol), usd: Math.abs(usd),
