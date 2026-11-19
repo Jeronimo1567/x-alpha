@@ -44,6 +44,15 @@ export function since(at: number, now: number) {
   return `${Math.round(s / 86400)} d ago`;
 }
 
+/** "in 4 min", "in 2 h", "in 3 d", or "due now" once the time has passed. */
+export function until(at: number, now: number) {
+  const s = (at - now) / 1000;
+  if (s <= 60) return "due now";
+  if (s < 3600) return `in ${Math.round(s / 60)} min`;
+  if (s < 86400) return `in ${Math.round(s / 3600)} h`;
+  return `in ${Math.round(s / 86400)} d`;
+}
+
 /**
  * A data source's mark in the header (Grok Bot, Gemini). Hover or focus opens an Arc hover card with
  * what the source does and when it last delivered, rows settling in one after another.

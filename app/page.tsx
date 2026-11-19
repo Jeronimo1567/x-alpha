@@ -13,7 +13,7 @@ import { Confidence, ConfidenceBadge } from "@/components/confidence";
 import { Market } from "@/components/market";
 import { PriceCallsChart } from "@/components/price-calls-chart";
 import { ContractTicket, ContractTicketEmpty, OtherMarkets, SourceTweet, type OtherMarket } from "@/components/contract-ticket";
-import { since, SourceStatus } from "@/components/source-status";
+import { since, SourceStatus, until } from "@/components/source-status";
 import { SiteFooter } from "@/components/site-footer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { XAlphaLogo } from "@/components/x-alpha-logo";
@@ -28,6 +28,8 @@ import { HORIZON_DAYS, trackRecord, type Call, type PriceSeries, type Tally, typ
 const HIDDEN_KEY = "x-alpha-hidden-samples";
 /** The Streams count as live while a real swap has arrived this recently. Large swaps on Ethereum come every few minutes. */
 const STREAMS_FRESH_MS = 30 * 60_000;
+/** How often the scheduled Grok task runs the routine. Set NEXT_PUBLIC_GROK_ROUTINE_HOURS to match the task's schedule. */
+const ROUTINE_EVERY_MS = (Number(process.env.NEXT_PUBLIC_GROK_ROUTINE_HOURS) || 24) * 3_600_000;
 
 export default function Page() {
   // Accounts Grok Bot has sent in come first; the invented samples stay as a fallback.
@@ -113,6 +115,8 @@ export default function Page() {
   const match = best?.pick ?? null;
 
   const lastRun = fromGrok.length ? Math.max(...fromGrok.map((a) => Date.parse(a.analyzedAt!))) : null;
+  // The routine re-reads every account on Grok's schedule, so the next run is due one interval after the last.
+  const nextRun = lastRun === null ? null : lastRun + ROUTINE_EVERY_MS;
   const lastCandle = prices?.[symbol]?.at(-1)?.[0] ?? null;
   const pick = (s: TokenSymbol) => { setPicked(s); setLadderIndex(null); };
 
@@ -136,15 +140,19 @@ export default function Page() {
         </div>
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          <SourceStatus name="Grok Bot" logo={<GrokBotLogo className="size-5" />} onRefresh={loadReadings}
+          {/* No refresh here: Grok Bot sends data on its own schedule, so the card says when the next routine run is due. */}
+          <SourceStatus name="Grok Bot" logo={<GrokBotLogo className="size-5" />}
             state={isSample ? "sample" : "live"}
-            rows={isSample ? [
-              { label: "This account", value: "Invented sample, not read from X" },
-              { label: "Last Grok run", value: lastRun ? `${since(lastRun, now)} · ${stamp(lastRun)}` : "No runs yet" },
-            ] : [
-              { label: "Last run", value: `${since(Date.parse(account.analyzedAt!), now)} · ${stamp(Date.parse(account.analyzedAt!))}` },
-              { label: "This account", value: `${account.handle} · ${account.posts.length} posts` },
-              { label: "Accounts read", value: fromGrok.length },
+            rows={[
+              ...(isSample ? [
+                { label: "This account", value: "Invented sample, not read from X" },
+                { label: "Last Grok run", value: lastRun ? `${since(lastRun, now)} · ${stamp(lastRun)}` : "No runs yet" },
+              ] : [
+                { label: "Last run", value: `${since(Date.parse(account.analyzedAt!), now)} · ${stamp(Date.parse(account.analyzedAt!))}` },
+                { label: "This account", value: `${account.handle} · ${account.posts.length} posts` },
+                { label: "Accounts read", value: fromGrok.length },
+              ]),
+              { label: "Next routine run", value: nextRun === null ? "After the first run" : now >= nextRun - 60_000 ? `Due now · ${stamp(nextRun)}` : `${until(nextRun, now)} · ${stamp(nextRun)}` },
             ]} />
           <SourceStatus name="Gemini" logo={<GeminiLogo className="size-5" />} onRefresh={() => { setOddsNonce((n) => n + 1); return loadPrices(); }}
             state={odds.status === "ready" ? (ladders.length ? "live" : "error") : odds.status === "error" ? "error" : "loading"}
