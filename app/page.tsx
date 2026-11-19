@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Avatar } from "@/components/account-avatar";
-import { GeminiLogo, GrokBotLogo } from "@/components/brand-logos";
+import { GeminiLogo, GrokBotLogo, QuickNodeMark } from "@/components/brand-logos";
 import { ChipGroup } from "@/components/arc/chip-group/chip-group";
 import SegmentedControl from "@/components/arc/segmented-control/segmented-control";
 import { CompareTable } from "@/components/compare-table";
@@ -17,7 +17,7 @@ import { since, SourceStatus } from "@/components/source-status";
 import { SiteFooter } from "@/components/site-footer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { XAlphaLogo } from "@/components/x-alpha-logo";
-import { DAY_MS, OddsState, card, cents, clock, date, label, neutralAccent, pct, sideOf, signed, stamp, usd, useOdds, when, displayName } from "@/components/shared";
+import { DAY_MS, OddsState, card, cents, clock, date, label, neutralAccent, pct, sideOf, signed, stamp, usd, useOdds, useStreams, when, displayName } from "@/components/shared";
 
 import type { Ladder, Match } from "@/lib/gemini";
 import { bestContract, type Pick, type PickResult } from "@/lib/pick";
@@ -26,6 +26,8 @@ import { stances, TOKEN_NAMES, type TokenStance, type TokenSymbol } from "@/lib/
 import { HORIZON_DAYS, trackRecord, type Call, type PriceSeries, type Tally, type TokenRecord } from "@/lib/track";
 
 const HIDDEN_KEY = "x-alpha-hidden-samples";
+/** The Streams count as live while a real swap has arrived this recently. Large swaps on Ethereum come every few minutes. */
+const STREAMS_FRESH_MS = 30 * 60_000;
 
 export default function Page() {
   // Accounts Grok Bot has sent in come first; the invented samples stay as a fallback.
@@ -41,15 +43,17 @@ export default function Page() {
     const t = setInterval(tick, 30_000);
     return () => { clearTimeout(first); clearInterval(t); };
   }, []);
-  const loadReadings = useCallback(() => {
-    fetch("/api/readings").then((r) => r.json()).then((b) => { if (Array.isArray(b.accounts)) setFromGrok(b.accounts); }).catch(() => {});
-  }, []);
+  const loadReadings = useCallback(() =>
+    fetch("/api/readings").then((r) => r.json()).then((b) => { if (Array.isArray(b.accounts)) setFromGrok(b.accounts); }).catch(() => {}), []);
+  const loadPrices = useCallback(() =>
+    fetch("/api/prices").then((r) => r.json()).then((b) => { setPrices(b.prices ?? {}); setPricesAt(Date.now()); }).catch(() => setPrices((p) => p ?? {})), []);
   useEffect(() => {
-    let live = true;
-    loadReadings();
-    fetch("/api/prices").then((r) => r.json()).then((b) => { if (live) { setPrices(b.prices ?? {}); setPricesAt(Date.now()); } }).catch(() => { if (live) setPrices({}); });
-    return () => { live = false; };
-  }, [loadReadings]);
+    const t = setTimeout(() => { loadReadings(); loadPrices(); }, 0);
+    return () => clearTimeout(t);
+  }, [loadReadings, loadPrices]);
+  // The header's Gemini refresh bumps this to fetch the odds again.
+  const [oddsNonce, setOddsNonce] = useState(0);
+  const [streams, reloadStreams] = useStreams();
 
   const [chosen, setChosen] = useState<string | null>(null);
   const [mode, setMode] = useState<"dashboard" | "account" | "compare">("dashboard");
@@ -95,7 +99,7 @@ export default function Page() {
 
   // Memoised so the chart only recomputes its markers when the account or its calls change.
   const singleSource = useMemo(() => [{ account, calls: tokenCalls }], [account, tokenCalls]);
-  const odds = useOdds(symbol);
+  const odds = useOdds(symbol, oddsNonce);
   const ladders = odds.status === "ready" ? odds.ladders : [];
   const ladder = ladders.length ? ladders[ladderIndex ?? ladders.length - 1] ?? ladders[ladders.length - 1] : null; // default: longest horizon
   const side = sideOf(stance.score);
@@ -132,7 +136,7 @@ export default function Page() {
         </div>
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          <SourceStatus name="Grok Bot" logo={<GrokBotLogo className="size-5" />}
+          <SourceStatus name="Grok Bot" logo={<GrokBotLogo className="size-5" />} onRefresh={loadReadings}
             state={isSample ? "sample" : "live"}
             rows={isSample ? [
               { label: "This account", value: "Invented sample, not read from X" },
@@ -142,7 +146,7 @@ export default function Page() {
               { label: "This account", value: `${account.handle} · ${account.posts.length} posts` },
               { label: "Accounts read", value: fromGrok.length },
             ]} />
-          <SourceStatus name="Gemini" logo={<GeminiLogo className="size-5" />}
+          <SourceStatus name="Gemini" logo={<GeminiLogo className="size-5" />} onRefresh={() => { setOddsNonce((n) => n + 1); return loadPrices(); }}
             state={odds.status === "ready" ? (ladders.length ? "live" : "error") : odds.status === "error" ? "error" : "loading"}
             rows={[
               { label: "Odds updated", value: odds.status === "ready" ? `${since(odds.at, now)} · ${clock(odds.at)}` : odds.status === "error" ? odds.message : "Loading…" },
@@ -150,6 +154,13 @@ export default function Page() {
               { label: "Latest candle", value: lastCandle ? `Hourly · ${clock(lastCandle)}` : "–" },
               { label: `${symbol} markets`, value: ladders.length ? `${ladders.length} open · next ${new Date(ladders[0].expiry).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric" })}` : "None open" },
             ]} />
+          {/* Live while real swaps keep arriving from the Streams; amber when nothing has come in for a while. */}
+          <SourceStatus name="QuickNode" logo={<QuickNodeMark className="h-4 w-auto" />} onRefresh={reloadStreams}
+            state={streams.status === "loading" ? "loading" : streams.status === "error" ? "error" : streams.last !== null && now > 0 && now - streams.last < STREAMS_FRESH_MS ? "live" : "idle"}
+            rows={streams.status === "ready" ? [
+              { label: "Last swap", value: streams.last !== null ? `${since(streams.last, now)} · ${clock(streams.last)}` : "None in the last day" },
+              ...streams.tokens.map((t) => ({ label: `${t.token} · ${t.chain === "solana" ? "Solana" : "Ethereum"}`, value: t.count ? `${t.count} swaps today · ${since(t.last!, now)}` : "No swaps today" })),
+            ] : [{ label: "Streams", value: streams.status === "error" ? "Couldn't check" : "Checking…" }]} />
         </div>
       </header>
 

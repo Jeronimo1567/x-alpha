@@ -6,9 +6,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { list, put } from "@vercel/blob";
 import { TOKENS, type TokenSymbol } from "./stance";
-import type { Chain } from "./onchain-sources";
+import { ONCHAIN, ONCHAIN_SOURCES, type Chain } from "./onchain-sources";
 
-export { ONCHAIN } from "./onchain-sources";
+export { ONCHAIN };
 
 export type Swap = {
   sig: string; time: number; token: TokenSymbol; chain: Chain; wallet: string; side: "buy" | "sell";
@@ -24,6 +24,8 @@ export type Swap = {
 export const MIN_USD = 10_000;
 
 const DIR = path.join(process.cwd(), ".data", "swaps");
+/** Blob files are grouped by the leading digits of their time in ms: 1e8 ms is about 28 hours. */
+const BUCKET = 1e8;
 const useBlob = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN && process.env.VERCEL);
 const isToken = (t: unknown): t is TokenSymbol => (TOKENS as readonly unknown[]).includes(t);
 
@@ -69,16 +71,20 @@ export async function saveSwaps(swaps: Swap[]): Promise<number> {
 export async function loadSwaps(token: TokenSymbol, from: number, to: number): Promise<Swap[]> {
   let all: Swap[] = [];
   if (useBlob()) {
-    let cursor: string | undefined;
+    // File names start with the delivery's time in ms, so listing by its leading digits (one prefix per ~28 hours)
+    // reads only the files near the window instead of every delivery ever made.
     const urls: string[] = [];
-    do {
-      const page = await list({ prefix: `swaps/${token}/`, cursor, limit: 1000 });
-      for (const b of page.blobs) {
-        const t = Number(b.pathname.split("/").pop()!.split("-")[0]);
-        if (t >= from - 60_000 && t <= to + 60_000) urls.push(b.url);
-      }
-      cursor = page.hasMore ? page.cursor : undefined;
-    } while (cursor);
+    for (let bucket = Math.floor((from - 60_000) / BUCKET); bucket <= Math.floor((to + 60_000) / BUCKET); bucket++) {
+      let cursor: string | undefined;
+      do {
+        const page = await list({ prefix: `swaps/${token}/${bucket}`, cursor, limit: 1000 });
+        for (const b of page.blobs) {
+          const t = Number(b.pathname.split("/").pop()!.split("-")[0]);
+          if (t >= from - 60_000 && t <= to + 60_000) urls.push(b.url);
+        }
+        cursor = page.hasMore ? page.cursor : undefined;
+      } while (cursor);
+    }
     const batches = await Promise.all(urls.map((u) => fetch(u, { cache: "force-cache" }).then((r) => (r.ok ? r.json() : [])).catch(() => [])));
     all = batches.flat();
   } else {
@@ -92,4 +98,23 @@ export async function loadSwaps(token: TokenSymbol, from: number, to: number): P
     .filter((s) => s.time >= from && s.time <= to)
     .filter((s) => { const k = `${s.sig}:${s.side}`; if (seen.has(k)) return false; seen.add(k); return true; })
     .sort((a, b) => a.time - b.time);
+}
+
+export type StreamsStatus = {
+  /** Newest real swap from QuickNode in each covered token over the last day, and how many arrived. */
+  tokens: { token: TokenSymbol; chain: Chain; last: number | null; count: number }[];
+  /** Newest real swap in any token. */
+  last: number | null;
+  checkedAt: number;
+};
+
+/** How the Streams are doing, from what has arrived: simulated swaps don't count. */
+export async function streamsStatus(now = Date.now()): Promise<StreamsStatus> {
+  const from = now - 24 * 3_600_000;
+  const tokens = await Promise.all((Object.keys(ONCHAIN_SOURCES) as TokenSymbol[]).map(async (token) => {
+    const real = (await loadSwaps(token, from, now)).filter((s) => !s.sim);
+    return { token, chain: ONCHAIN[token]!.chain, last: real.at(-1)?.time ?? null, count: real.length };
+  }));
+  const last = tokens.reduce<number | null>((m, t) => (t.last !== null && (m === null || t.last > m) ? t.last : m), null);
+  return { tokens, last, checkedAt: now };
 }

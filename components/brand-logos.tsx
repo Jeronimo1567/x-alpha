@@ -27,6 +27,11 @@ const QUICKNODE = [
   "M100.744 8.88684C99.7442 7.69363 98.329 7.09702 96.5006 7.09702C95.0762 7.09702 93.8687 7.48862 92.8807 8.27411C92.4905 8.58508 92.1557 8.96056 91.8764 9.39592V9.38901L91.6755 9.69768C91.5763 9.84971 91.3408 9.78521 91.3339 9.60323L91.3223 9.35906L91.2692 7.48401H88.1757V24.6336H91.5578V14.641C91.5578 13.1575 91.918 12.0081 92.6429 11.1927C93.3655 10.3772 94.3443 9.96719 95.5771 9.96719C96.7476 9.96719 97.5879 10.3588 98.0982 11.1443C98.6084 11.9298 98.8646 13.0953 98.8646 14.641V24.6336H102.247V13.609C102.247 11.6534 101.746 10.0801 100.748 8.88684H100.744Z",
 ];
 
+/** Just the Q mark from the wordmark, for square spots like the header. */
+export function QuickNodeMark({ className }: Props) {
+  return <svg viewBox="0 0 30 26" fill="currentColor" aria-hidden="true" className={className}><path d={QUICKNODE[7]} /></svg>;
+}
+
 export function QuickNodeLogo({ className, title = "QuickNode" }: Props & { title?: string }) {
   return <svg viewBox="0 0 158 26" fill="currentColor" role="img" aria-label={title} className={className}>{QUICKNODE.map((d) => <path key={d.slice(0, 16)} d={d} />)}</svg>;
 }

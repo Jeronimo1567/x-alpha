@@ -1,10 +1,11 @@
 "use client";
 // Pieces both the single-account view and the compare view use: formatting, the Gemini odds loader, and the inline price tag.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Ladder } from "@/lib/gemini";
 import type { Account, Stance } from "@/lib/sample";
 import type { TokenSymbol } from "@/lib/stance";
+import type { StreamsStatus } from "@/lib/swaps";
 
 export const card = "rounded-xl bg-card p-5 text-card-foreground ring-1 ring-foreground/10";
 export const label = "font-mono text-[11px] uppercase tracking-wider text-muted-foreground";
@@ -33,7 +34,8 @@ export type OddsState = { status: "loading" } | { status: "error"; message: stri
 /** While Gemini is failing, try again this often, so the page recovers on its own without a reload. */
 const RETRY_MS = 20_000;
 
-export function useOdds(symbol: TokenSymbol): OddsState {
+/** Gemini odds for the token. Changing `nonce` fetches them again (the header's refresh). */
+export function useOdds(symbol: TokenSymbol, nonce = 0): OddsState {
   const [state, setState] = useState<{ symbol: TokenSymbol; odds: OddsState } | null>(null);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -54,8 +56,28 @@ export function useOdds(symbol: TokenSymbol): OddsState {
       })
       .catch(() => failed("Could not reach the server"));
     return () => { live = false; clearTimeout(retry); };
-  }, [symbol, attempt]);
+  }, [symbol, attempt, nonce]);
   return state?.symbol === symbol ? state.odds : { status: "loading" };
+}
+
+export type StreamsState = { status: "loading" } | { status: "error" } | ({ status: "ready" } & StreamsStatus);
+
+/** What the QuickNode Streams have delivered lately, checked every minute; `reload` checks now. */
+export function useStreams(): [StreamsState, () => Promise<void>] {
+  const [state, setState] = useState<StreamsState>({ status: "loading" });
+  const reload = useCallback(async () => {
+    try {
+      const r = await fetch("/api/streams/status", { cache: "no-store" });
+      const body = await r.json();
+      setState(r.ok ? { status: "ready", ...body } : { status: "error" });
+    } catch { setState({ status: "error" }); }
+  }, []);
+  useEffect(() => {
+    const first = setTimeout(reload, 0);
+    const t = setInterval(reload, 60_000);
+    return () => { clearTimeout(first); clearInterval(t); };
+  }, [reload]);
+  return [state, reload];
 }
 
 
