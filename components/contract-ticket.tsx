@@ -129,7 +129,8 @@ const postedOn = (t: number) => new Date(t).toLocaleString("en-US", { month: "sh
  * The post behind a pick, styled like a small X card: the one that named the price level the pick is built on, or,
  * with no level named, their strongest post on this coin on the lean's side. The words that set the level are marked.
  */
-export function SourceTweet({ account, pick, symbol, now = Date.now() }: { account: Account; pick: Pick; symbol: TokenSymbol; now?: number }) {
+export function SourceTweet({ account, pick, symbol, now = Date.now(), badge, fill = false }: { account: Account; pick: Pick; symbol: TokenSymbol; now?: number; /** Shown at the foot of the post, e.g. the confidence. */ badge?: React.ReactNode;
+  /** Fill the height it is given, with the "why" line inside the card, so it can sit level with the contract. */ fill?: boolean }) {
   const lean = pick.side === "yes" ? "bullish" : "bearish";
   const post = pick.target
     ? account.posts.find((p) => p.id === pick.target!.postId)
@@ -153,25 +154,34 @@ export function SourceTweet({ account, pick, symbol, now = Date.now() }: { accou
     : <>{start > 0 && "… "}{body.slice(start, i)}<mark className="rounded bg-foreground/15 px-0.5 font-medium text-foreground">{body.slice(i, j)}</mark>{body.slice(j, end < 0 ? undefined : end)}{end >= 0 && " …"}</>;
 
   const Tag = url ? "a" : "div";
+  const why = (
+    <span className="text-xs text-muted-foreground">
+      {pick.target ? <>Why this market: they named <span className="font-medium text-foreground">{usd(pick.target.price)}</span></> : "Why this market: no level named, so it follows their lean"}
+    </span>
+  );
   return (
-    <div className="grid gap-1.5">
-      <span className="text-xs text-muted-foreground">
-        {pick.target ? <>Why this market: they named <span className="font-medium text-foreground">{usd(pick.target.price)}</span></> : "Why this market: no level named, so it follows their lean"}
-      </span>
+    <div className={fill ? "grid h-full" : "grid gap-1.5"}>
+      {/* Next to the contract the post speaks for itself; elsewhere a line says why it was picked. */}
+      {!fill && why}
       <Tag {...(url ? { href: url, target: "_blank", rel: "noreferrer" } : {})}
-        className="grid gap-2 rounded-xl bg-foreground/[0.03] p-3 ring-1 ring-foreground/10 outline-none transition-colors hover:ring-foreground/25 focus-visible:ring-2 focus-visible:ring-ring">
+        className={`grid gap-2 rounded-xl bg-foreground/[0.03] p-3 ring-1 ring-foreground/10 outline-none transition-colors hover:ring-foreground/25 focus-visible:ring-2 focus-visible:ring-ring ${fill ? "grid-rows-[auto_1fr_auto] p-3.5" : ""}`}>
         <div className="flex items-center gap-2">
           <Avatar account={account} className="size-7 text-[10px]" />
           <div className="min-w-0 flex-1 leading-tight">
             <div className="truncate text-sm font-semibold">{account.name}</div>
             <div className="truncate text-xs text-muted-foreground">{account.handle} · {postedOn(at)}</div>
           </div>
-          <svg viewBox="0 0 24 24" className="size-3.5 shrink-0 fill-current" aria-hidden="true">
-            <path d="M18.9 2H22l-7.6 8.7L23.3 22h-7l-5.5-7.2L4.5 22H1.4l8.1-9.3L.9 2h7.2l5 6.6L18.9 2Zm-1.2 18h1.7L7.2 3.9H5.4L17.7 20Z" />
+          <svg viewBox="0 0 24 24" className="size-4 shrink-0 self-start fill-current text-foreground/80" aria-label="Post on X" role="img">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
           </svg>
         </div>
         <p className={`text-sm leading-snug whitespace-pre-line ${i < 0 ? "line-clamp-5" : ""}`}>{text}</p>
-        {url && <span className="text-xs text-muted-foreground">Open on X ↗</span>}
+        {(url || badge) && (
+          <div className="flex items-center justify-between gap-2">
+            {badge ?? <span />}
+            {url && <span className="text-xs text-muted-foreground">Open on X ↗</span>}
+          </div>
+        )}
       </Tag>
     </div>
   );

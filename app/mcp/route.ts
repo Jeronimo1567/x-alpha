@@ -1,12 +1,16 @@
 // A small MCP server (Streamable HTTP, stateless) so an agent such as Grok Bot can
-// call X Alpha's tools. It reads Gemini's public market data and stores account readings. No trades.
+// call X Alpha's tools. It reads Gemini's public market data, stores account readings,
+// and reads large-wallet swaps in the main tokens from QuickNode Streams. No trades.
 import { cleanBrief, getBrief, saveBrief } from "@/lib/brief";
 import { ladders, matchContract, type Ladder } from "@/lib/gemini";
 import { cleanAvatar, cleanHandle, cleanPosts, getReading, saveReading, toAccount, type Reading } from "@/lib/readings";
 import { allPrices } from "@/lib/prices";
-import { lean, stances, TOKEN_NAMES, TOKENS } from "@/lib/stance";
+import { lean, stances, TOKEN_NAMES, TOKENS, type TokenSymbol } from "@/lib/stance";
 import { bestContract } from "@/lib/pick";
 import { HORIZON_DAYS, trackRecord } from "@/lib/track";
+import { postImpact } from "@/lib/impact";
+import { pricesAround } from "@/lib/prices";
+import { loadSwaps, ONCHAIN } from "@/lib/swaps";
 
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const round = (n: number | null, d = 2) => (n === null ? null : Number(n.toFixed(d)));
@@ -139,6 +143,20 @@ const TOOLS = [
       required: ["symbol", "lean"], additionalProperties: false,
     },
   },
+  {
+    name: "get_onchain_flow",
+    description:
+      "What happened around one call on a main token: the price from 12 hours before the post to 24 hours after it (Gemini candles), and large-wallet buying and selling onchain over the same window (swaps of $10k or more, from X Alpha's QuickNode Streams). Says whether the call is right so far and whether big wallets went the same way. Covers SOL (Solana), ETH and BTC (as WBTC) on Ethereum.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: symbolProp,
+        posted_at: { type: "string", description: "When the post was made, ISO 8601." },
+        stance: { type: "string", enum: ["bullish", "bearish"], description: "Which way the post called it." },
+      },
+      required: ["symbol", "posted_at", "stance"], additionalProperties: false,
+    },
+  },
 ];
 
 const summarize = (l: Ladder) => ({
@@ -196,6 +214,24 @@ async function report(r: Reading, origin: string) {
   };
 }
 
+/** Price and large-wallet flow around one call, shaped for an agent: dollars rounded, one line per flag. */
+async function onchainFlow(symbol: TokenSymbol, postAt: number, stance: "bullish" | "bearish") {
+  const HOUR = 3_600_000;
+  const cover = ONCHAIN[symbol];
+  if (!cover) return { symbol, message: `Onchain flow isn't tracked for ${symbol} yet. Covered: ${Object.keys(ONCHAIN).join(", ")}.` };
+  const [swaps, candles] = await Promise.all([loadSwaps(symbol, postAt - 12 * HOUR, postAt + 24 * HOUR), pricesAround(symbol, postAt - 12 * HOUR)]);
+  const i = postImpact({ swaps, candles, postAt, stance });
+  const usd = (n: number) => Math.round(n);
+  return {
+    symbol, stance, posted_at: new Date(postAt).toISOString(),
+    onchain_source: i.simulated ? "SIMULATED swaps (demo), not real QuickNode data" : `QuickNode Streams: ${cover.source}, swaps of $10k or more`,
+    price_at_post: i.priceAtPost, price_now: i.priceNow, change_since_post: round(i.change, 4), move_in_call_direction: round(i.callMove, 4),
+    large_flow_12h_before: { bought_usd: usd(i.before.buyUsd), sold_usd: usd(i.before.sellUsd), net_usd: usd(i.before.netUsd), swaps: i.before.trades },
+    large_flow_after: { bought_usd: usd(i.after.buyUsd), sold_usd: usd(i.after.sellUsd), net_usd: usd(i.after.netUsd), swaps: i.after.trades, wallets: i.after.wallets },
+    verdict: i.flags.map((f) => `${f.label}: ${f.detail}`),
+  };
+}
+
 async function callTool(name: string, args: Record<string, unknown>, ctx: { canWrite: boolean; origin: string }) {
   if (name === "save_account_reading") {
     if (!ctx.canWrite) throw new Error("This server needs its key to save readings. Reconnect using the MCP address that ends in ?key=...");
@@ -212,6 +248,14 @@ async function callTool(name: string, args: Record<string, unknown>, ctx: { canW
     return { saved: true, saved_at: b.savedAt, coins: b.coins.length, voices: b.voices.length, news: b.news.length, suggested_accounts: b.suggested?.length ?? 0, dashboard: ctx.origin };
   }
   if (name === "get_market_brief") return (await getBrief()) ?? { message: "No brief saved yet. Use save_market_brief." };
+  if (name === "get_onchain_flow") {
+    const symbol = String(args.symbol ?? "").toUpperCase();
+    if (!(TOKENS as readonly string[]).includes(symbol)) throw new Error(`symbol must be one of ${TOKENS.join(", ")}`);
+    const at = Date.parse(String(args.posted_at ?? ""));
+    if (Number.isNaN(at)) throw new Error("posted_at must be an ISO date");
+    if (args.stance !== "bullish" && args.stance !== "bearish") throw new Error("stance must be bullish or bearish");
+    return onchainFlow(symbol as TokenSymbol, at, args.stance);
+  }
   if (name === "get_account_reading") {
     const handle = cleanHandle(args.handle);
     const r = await getReading(handle);
@@ -252,7 +296,7 @@ async function handle(msg: Rpc, ctx: { canWrite: boolean; origin: string }) {
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: {} },
         serverInfo: { name: "x-alpha", version: "0.4.0" },
-        instructions: `X Alpha turns an X account's recent posts into a lean per crypto token (${COINS}) and matches it to live Gemini prediction market odds. Read the account on X, then call save_account_reading. As part of each routine run, also call save_market_brief with how crypto looks overall: top voices on X and the big news. Nothing here places trades.`,
+        instructions: `X Alpha turns an X account's recent posts into a lean per crypto token (${COINS}) and matches it to live Gemini prediction market odds. Read the account on X, then call save_account_reading. As part of each routine run, also call save_market_brief with how crypto looks overall: top voices on X and the big news. To see whether big wallets went the same way as a call, use get_onchain_flow (live QuickNode Streams data). Nothing here places trades.`,
       });
     }
     case "ping": return reply({});

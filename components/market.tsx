@@ -1,6 +1,7 @@
 "use client";
 
 import { Avatar } from "@/components/account-avatar";
+import { GeminiLogo } from "@/components/brand-logos";
 import { ChipGroup } from "@/components/arc/chip-group/chip-group";
 import { cents, card, geminiUrl, label, neutralAccent, pct, shortWhen, Tag, usd, type OddsState } from "@/components/shared";
 import type { Ladder, Match } from "@/lib/gemini";
@@ -26,9 +27,14 @@ export function Market({ symbol, odds, ladders, ladder, onLadder, marks }: {
   const split = exp === null ? -1 : rungs.findIndex((r) => r.strike > exp);
   return (
     <div className={card}>
-      <div className="mb-3 flex items-baseline justify-between gap-2">
+      <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="font-semibold">What the market thinks</h2>
-        {ladder && <a href={geminiUrl(ladder)} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">View on Gemini ↗</a>}
+        {ladder && (
+          <a href={geminiUrl(ladder)} target="_blank" rel="noreferrer" title="View this market on Gemini" aria-label="View on Gemini"
+            className="flex shrink-0 items-center gap-1.5 rounded-full py-1 pr-3 pl-1 text-sm font-semibold ring-1 ring-foreground/10 transition-colors hover:bg-foreground/[0.04]">
+            <span className="grid size-6 place-items-center rounded-full bg-neutral-950 text-white"><GeminiLogo className="size-3.5" /></span>Gemini
+          </a>
+        )}
       </div>
       {odds.status === "loading" && <p className="text-sm text-muted-foreground">Loading live odds from Gemini…</p>}
       {odds.status === "error" && <p className="text-sm text-bad">Couldn&apos;t load Gemini odds: {odds.message}. Reload to try again.</p>}

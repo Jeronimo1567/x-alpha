@@ -8,7 +8,8 @@ import SegmentedControl from "@/components/arc/segmented-control/segmented-contr
 import { CompareTable } from "@/components/compare-table";
 import { CompareView } from "@/components/compare-view";
 import { Dashboard } from "@/components/dashboard";
-import { Confidence } from "@/components/confidence";
+import { AccountOnchain } from "@/components/onchain";
+import { Confidence, ConfidenceBadge } from "@/components/confidence";
 import { Market } from "@/components/market";
 import { PriceCallsChart } from "@/components/price-calls-chart";
 import { ContractTicket, ContractTicketEmpty, OtherMarkets, SourceTweet, type OtherMarket } from "@/components/contract-ticket";
@@ -16,9 +17,8 @@ import { since, SourceStatus } from "@/components/source-status";
 import { SiteFooter } from "@/components/site-footer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { XAlphaLogo } from "@/components/x-alpha-logo";
-import { DAY_MS, OddsState, Tag, card, cents, clock, date, label, neutralAccent, pct, sideOf, signed, stamp, usd, useOdds, when, displayName } from "@/components/shared";
+import { DAY_MS, OddsState, card, cents, clock, date, label, neutralAccent, pct, sideOf, signed, stamp, usd, useOdds, when, displayName } from "@/components/shared";
 
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import type { Ladder, Match } from "@/lib/gemini";
 import { bestContract, type Pick, type PickResult } from "@/lib/pick";
 import { ACCOUNTS, type Account, type Stance } from "@/lib/sample";
@@ -199,7 +199,7 @@ export default function Page() {
           <TokenTabs all={all} symbol={symbol} onPick={pick} byToken={record?.byToken} resetKey={account.handle} />
         </div>
 
-        <p className="text-lg leading-[1.9] text-pretty">
+        <p className="text-lg leading-relaxed text-pretty">
           <Verdict symbol={symbol} stance={stance} handle={displayName(account)} tally={tokenRecord} pricesReady={record !== null} match={match} ladder={ladder} odds={odds} series={prices?.[symbol]} reason={best?.reason} />
         </p>
 
@@ -209,6 +209,8 @@ export default function Page() {
           others={otherMarkets} onLadder={setLadderIndex}
           leaning={all.filter((t) => t.symbol !== symbol && sideOf(t.score)).map((t) => t.symbol)} onPick={pick} />
       </section>
+
+      <AccountOnchain key={account.handle + symbol} account={account} symbol={symbol} />
 
       <section>
         <Market symbol={symbol} odds={odds} ladders={ladders} ladder={ladder} onLadder={setLadderIndex} marks={[{ account, match }]} />
@@ -232,9 +234,7 @@ function TokenTabs({ all, symbol, onPick, byToken, resetKey }: {
     .sort((a, b) => (b.rec?.settled ?? 0) - (a.rec?.settled ?? 0))
     .map(({ s }) => s);
   const options = [...active, ...quiet].map((s) => {
-    const side = sideOf(s.score);
     const rec = byToken?.find((b) => b.token === s.symbol);
-    const Arrow = side === "bullish" ? ArrowUpRight : ArrowDownRight;
     return {
       value: s.symbol,
       label: (
@@ -242,12 +242,6 @@ function TokenTabs({ all, symbol, onPick, byToken, resetKey }: {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={`/tokens/${s.symbol.toLowerCase()}.svg`} alt="" className={`size-4 ${s.posts ? "" : "opacity-50 grayscale"}`} />
           {s.symbol}
-          {s.score !== null && (
-            <span className={`inline-flex items-center gap-0.5 font-mono text-[11px] ${side === "bullish" ? "text-good" : side === "bearish" ? "text-bad" : "text-muted-foreground"}`}>
-              {side ? <Arrow className="size-3" strokeWidth={2.75} aria-label={side} /> : "•"}
-              {Math.round(side === "bearish" ? 100 - s.score : s.score)}%
-            </span>
-          )}
           {s.posts === 0 && rec && rec.settled > 0 && <span className="font-mono text-[11px] text-muted-foreground">{rec.right}/{rec.settled}</span>}
         </span>
       ),
@@ -256,7 +250,8 @@ function TokenTabs({ all, symbol, onPick, byToken, resetKey }: {
   return (
     // Arc tints the chosen chip with --accent; point it at the text colour here so it reads like the app's other selections.
     <div style={neutralAccent}>
-      <ChipGroup key={resetKey} label="Token" multiple={false} maxVisible={Math.max(1, active.length)} options={options}
+      {/* Only the chosen token shows; the rest open from "+N more" and fold away again once one is picked. */}
+      <ChipGroup key={resetKey + symbol} label="Token" multiple={false} maxVisible={0} options={options}
         value={[symbol]} onValueChange={(v) => { if (v[0]) onPick(v[0] as TokenSymbol); }} />
     </div>
   );
@@ -274,34 +269,21 @@ function Verdict({ symbol, stance, handle, tally, pricesReady, match, ladder, od
   const now = series?.at(-1);
   const weekAgo = now && series ? [...series].reverse().find(([t]) => t <= now[0] - 7 * DAY_MS) : undefined;
   const week = now && weekAgo ? now[1] / weekAgo[1] - 1 : null;
-  const token = (
-    <Tag title={`${TOKEN_NAMES[symbol]}${week !== null ? `, ${signed(week)} over 7 days` : ""}`}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={`/tokens/${symbol.toLowerCase()}.svg`} alt="" className="size-[1.05em]" />
-      {symbol}
-      {now && <span className="font-normal text-muted-foreground">{usd(now[1] >= 1000 ? Math.round(now[1]) : now[1])}</span>}
-      {week !== null && <span className="font-normal text-muted-foreground">{signed(week)}</span>}
-    </Tag>
-  );
+  // Plain text: the price and the week's move in brackets after the token.
+  const token = now ? `${symbol} (${usd(now[1] >= 1000 ? Math.round(now[1]) : now[1])}${week !== null ? `, ${signed(week)} this week` : ""})` : symbol;
 
   if (stance.score === null) return <>{handle} hasn&apos;t posted about {token} this week.</>;
   const score = Math.round(stance.score);
   const side = sideOf(stance.score);
-  const Arrow = side === "bullish" ? ArrowUpRight : ArrowDownRight;
-  const lean = side
-    ? <Tag tone={side === "bullish" ? "good" : "bad"}><Arrow className="size-[1em]" strokeWidth={2.75} aria-hidden="true" />{side === "bearish" ? 100 - score : score}% {side}</Tag>
-    : <Tag>mixed · {score}% bullish</Tag>;
+  const lean = side ? `${side === "bearish" ? 100 - score : score}% ${side}` : `mixed (${score}% bullish)`;
 
+  const market = !side ? " No clear lean, so there's no contract to match."
+    : odds.status === "loading" ? " Checking Gemini's odds…"
+    : odds.status === "error" ? " Gemini's prediction markets aren't responding right now, so there's no bet to show."
+    : !match || !ladder ? ` ${reason ?? "Gemini has no live contract on that side right now."}`
+    : ` Gemini gives a ${pct(match.marketChance)} chance it ends ${match.side === "yes" ? "at or above" : "below"} ${usd(match.rung.strike)} by ${date(ladder.expiry)}; their posts put it near ${pct(match.accountChance)}, so the best bet is ${match.side === "yes" ? "Yes" : "No"} at ${cents(match.price)}.`;
 
-  const market = !side ? <> No clear lean, so there&apos;s no contract to match.</>
-    : odds.status === "loading" ? <> Checking Gemini&apos;s odds…</>
-    : odds.status === "error" ? <> Gemini&apos;s prediction markets aren&apos;t responding right now, so there&apos;s no bet to show.</>
-    : !match || !ladder ? <> {reason ?? "Gemini has no live contract on that side right now."}</>
-    : <> Gemini gives a <Tag>{pct(match.marketChance)} chance</Tag> it ends {match.side === "yes" ? "at or above" : "below"}{" "}
-        <Tag>{usd(match.rung.strike)}</Tag> by {date(ladder.expiry)}; their posts put it near <Tag>{pct(match.accountChance)}</Tag>, so the best bet is{" "}
-        <Tag tone={match.side === "yes" ? "good" : "bad"}>{match.side === "yes" ? "Yes" : "No"} · {cents(match.price)}</Tag>.</>;
-
-  return <>{handle} is {lean} on {token} this week.{market}</>;
+  return <>{handle} is {lean} on {token}.{market}</>;
 }
 
 
@@ -349,28 +331,20 @@ function ContractCard({ account, symbol, stance, handle, result, ladder, odds, r
   return (
     <div className="grid gap-3 rounded-lg p-4 ring-1 ring-foreground/10">
       {head}
+      {/* The contract, laid out like Gemini's own market card, with the post behind it alongside. */}
       <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
-      <div className="grid content-start gap-3">
-      {/* The contract, laid out like Gemini's own market card. */}
-      <ContractTicket symbol={symbol} ladder={ladder} side={match.side} rung={match.rung} price={match.price} current={current} live={odds.status === "ready"} />
-
-      <Confidence record={record} calls={calls} symbol={symbol} />
+        <ContractTicket symbol={symbol} ladder={ladder} side={match.side} rung={match.rung} price={match.price} current={current} live={odds.status === "ready"} />
+        <SourceTweet fill account={account} pick={match} symbol={symbol} badge={<ConfidenceBadge record={record} symbol={symbol} />} />
       </div>
 
-      <div className="grid content-start gap-3">
-      <div className="grid gap-1.5">
-        {/* Chance this contract pays: by the account's view, then by Gemini's market. */}
+      {/* Chance this contract pays: by the account's view, then by Gemini's market. */}
+      <div className="grid gap-1.5 border-t border-foreground/[0.07] pt-3">
         {odd(handle.length > 9 ? "Their odds" : `${handle}'s odds`, match.accountChance, tone)}
         {odd("Market's odds", match.marketChance, "bg-foreground/40")}
         <div className="text-xs text-muted-foreground">
           If {handle.length > 12 ? "they're" : `${handle} is`} right: <span className="font-medium text-foreground tabular-nums">+{Math.round(match.edge * 100)}¢</span> expected per $1 share
         </div>
       </div>
-
-      <div className="border-t border-foreground/[0.07] pt-2.5"><SourceTweet account={account} pick={match} symbol={symbol} /></div>
-      </div>
-      </div>
-
     </div>
   );
 }

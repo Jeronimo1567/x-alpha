@@ -59,3 +59,22 @@ export function Confidence({ record, calls, symbol }: { record: Tally | null; ca
     </div>
   );
 }
+
+/** The same confidence, small enough to sit inside the source post: meter, percentage and level, details on hover. */
+export function ConfidenceBadge({ record, symbol }: { record: Tally | null; symbol: TokenSymbol }) {
+  const value = credibilityOf(record);
+  const level = confidenceLevel(value);
+  const settled = record?.settled ?? 0, right = record?.right ?? 0;
+  const share = `${Math.round(value * 100)}%`;
+  const detail = settled ? `${right} of ${settled} past ${symbol} calls right${settled < 5 ? " · few calls, held back" : ""}` : `No ${symbol} calls old enough to judge yet`;
+  return (
+    <span className="inline-flex items-center gap-2 rounded-lg bg-foreground/[0.05] py-1 pr-2.5 pl-2 text-xs ring-1 ring-foreground/10 ring-inset" title={`Confidence from past calls: ${detail}`} aria-label={`Confidence ${level}, ${share}. ${detail}`}>
+      <span className="text-muted-foreground">Confidence</span>
+      <span className="h-1 w-12 overflow-hidden rounded-full bg-foreground/10" aria-hidden="true">
+        <span className="block h-full rounded-full bg-foreground" style={{ width: share }} />
+      </span>
+      <span className="font-semibold tabular-nums">{share}</span>
+      <span className="text-muted-foreground">· {level}</span>
+    </span>
+  );
+}
