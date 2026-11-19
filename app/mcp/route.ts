@@ -56,7 +56,7 @@ const TOOLS = [
   {
     name: "save_market_brief",
     description:
-      `Part of the routine, after reading the accounts: send X Alpha a brief on how crypto looks right now. Search X and the news for the last 24 to 48 hours yourself: what the most-followed crypto voices are saying, and the biggest stories (ETF flows, regulation, hacks, listings, macro), and 2 to 4 accounts worth adding. X Alpha shows it on the dashboard. Each run replaces the last brief.`,
+      `Part of the routine, after reading the accounts: send X Alpha a brief on how crypto looks right now. Search X and the news for the last 24 to 48 hours yourself: what the most-followed crypto voices are saying, and the biggest stories (ETF flows, regulation, hacks, listings, macro), and 2 to 4 accounts worth adding. X Alpha shows it on the dashboard. Each run replaces the last brief. Also say when your scheduled task runs this routine next (next_run_at) and its schedule, so the dashboard can show when fresh data is due.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -113,6 +113,8 @@ const TOOLS = [
             required: ["handle", "why"], additionalProperties: false,
           },
         },
+        next_run_at: { type: "string", description: "When your scheduled task will run this routine next, ISO 8601 with time zone. Leave it out if this run wasn't scheduled." },
+        schedule: { type: "string", description: "The task's schedule in a few words, like \"Every day at 9:00 AM ET\"." },
       },
       required: ["mood", "headline", "summary", "voices", "news"], additionalProperties: false,
     },
@@ -245,7 +247,12 @@ async function callTool(name: string, args: Record<string, unknown>, ctx: { canW
   if (name === "save_market_brief") {
     if (!ctx.canWrite) throw new Error("This server needs its key to save. Reconnect using the MCP address that ends in ?key=...");
     const b = await saveBrief(cleanBrief(args));
-    return { saved: true, saved_at: b.savedAt, coins: b.coins.length, voices: b.voices.length, news: b.news.length, suggested_accounts: b.suggested?.length ?? 0, dashboard: ctx.origin };
+    return {
+      saved: true, saved_at: b.savedAt, coins: b.coins.length, voices: b.voices.length, news: b.news.length, suggested_accounts: b.suggested?.length ?? 0,
+      next_run_at: b.nextRunAt ?? null, schedule: b.schedule ?? null,
+      ...(b.nextRunAt ? {} : { note: "No next_run_at saved: the dashboard guesses the next run as 24 hours after this one. Send next_run_at (a future ISO time) next run." }),
+      dashboard: ctx.origin,
+    };
   }
   if (name === "get_market_brief") return (await getBrief()) ?? { message: "No brief saved yet. Use save_market_brief." };
   if (name === "get_onchain_flow") {
@@ -295,8 +302,13 @@ async function handle(msg: Rpc, ctx: { canWrite: boolean; origin: string }) {
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: {} },
-        serverInfo: { name: "x-alpha", version: "0.4.0" },
-        instructions: `X Alpha turns an X account's recent posts into a lean per crypto token (${COINS}) and matches it to live Gemini prediction market odds. Read the account on X, then call save_account_reading. As part of each routine run, also call save_market_brief with how crypto looks overall: top voices on X and the big news. To see whether big wallets went the same way as a call, use get_onchain_flow (live QuickNode Streams data). Nothing here places trades.`,
+        serverInfo: { name: "x-alpha", version: "0.5.0" },
+        instructions: [
+          `X Alpha turns an X account's recent posts into a lean per crypto token (${COINS}) and matches it to live Gemini prediction market odds. Nothing here places trades.`,
+          "One account: read its posts on X yourself, then call save_account_reading.",
+          "The routine (usually a scheduled task): re-read every saved account with save_account_reading, then call save_market_brief with how crypto looks overall (top voices on X, the big news, accounts worth adding). In save_market_brief, always send next_run_at (when your scheduled task runs next, ISO 8601) and schedule, so the dashboard shows when fresh data is due.",
+          `Onchain check: for an account's clearest recent calls on ${Object.keys(ONCHAIN).join(", ")}, call get_onchain_flow with the post's time and side to see whether big wallets traded the same way (swaps of $10k or more from X Alpha's QuickNode Streams). It only has swaps from when the Streams started, so a call with no swaps yet is not a finding.`,
+        ].join("\n\n"),
       });
     }
     case "ping": return reply({});

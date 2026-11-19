@@ -47,6 +47,13 @@ export default function Page() {
   }, []);
   const loadReadings = useCallback(() =>
     fetch("/api/readings").then((r) => r.json()).then((b) => { if (Array.isArray(b.accounts)) setFromGrok(b.accounts); }).catch(() => {}), []);
+  // The routine's own word on when it runs next, sent with the market brief.
+  const [routine, setRoutine] = useState<{ savedAt?: string; nextRunAt?: string; schedule?: string } | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/brief").then((r) => r.json()).then((b) => { if (live && b.brief) setRoutine({ savedAt: b.brief.savedAt, nextRunAt: b.brief.nextRunAt, schedule: b.brief.schedule }); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
   const loadPrices = useCallback(() =>
     fetch("/api/prices").then((r) => r.json()).then((b) => { setPrices(b.prices ?? {}); setPricesAt(Date.now()); }).catch(() => setPrices((p) => p ?? {})), []);
   useEffect(() => {
@@ -115,8 +122,11 @@ export default function Page() {
   const match = best?.pick ?? null;
 
   const lastRun = fromGrok.length ? Math.max(...fromGrok.map((a) => Date.parse(a.analyzedAt!))) : null;
-  // The routine re-reads every account on Grok's schedule, so the next run is due one interval after the last.
-  const nextRun = lastRun === null ? null : lastRun + ROUTINE_EVERY_MS;
+  // Grok Bot says when its scheduled task runs next (with the market brief). Without that, the next run is
+  // assumed one interval after the last routine activity.
+  const reported = routine?.nextRunAt ? Date.parse(routine.nextRunAt) : NaN;
+  const lastActivity = Math.max(lastRun ?? 0, routine?.savedAt ? Date.parse(routine.savedAt) : 0) || null;
+  const nextRun = !Number.isNaN(reported) && (!lastActivity || reported > lastActivity) ? reported : lastActivity === null ? null : lastActivity + ROUTINE_EVERY_MS;
   const lastCandle = prices?.[symbol]?.at(-1)?.[0] ?? null;
   const pick = (s: TokenSymbol) => { setPicked(s); setLadderIndex(null); };
 
@@ -153,6 +163,7 @@ export default function Page() {
                 { label: "Accounts read", value: fromGrok.length },
               ]),
               { label: "Next routine run", value: nextRun === null ? "After the first run" : now >= nextRun - 60_000 ? `Due now · ${stamp(nextRun)}` : `${until(nextRun, now)} · ${stamp(nextRun)}` },
+              ...(routine?.schedule ? [{ label: "Schedule", value: routine.schedule }] : []),
             ]} />
           <SourceStatus name="Gemini" logo={<GeminiLogo className="size-5" />} onRefresh={() => { setOddsNonce((n) => n + 1); return loadPrices(); }}
             state={odds.status === "ready" ? (ladders.length ? "live" : "error") : odds.status === "error" ? "error" : "loading"}

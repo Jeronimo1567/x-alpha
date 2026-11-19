@@ -1,5 +1,9 @@
 // The prompts the person copies and pastes to Grok Bot: research one account, or run the whole routine.
 import { TOKEN_NAMES, TOKENS } from "@/lib/stance";
+import { ONCHAIN } from "@/lib/onchain-sources";
+
+/** The tokens get_onchain_flow covers, for the prompts. */
+const ONCHAIN_TOKENS = Object.keys(ONCHAIN).join(", ");
 
 /** What Grok Bot is asked to do. Never shown: the person only copies it and pastes it to their Grok Bot. */
 export function promptFor(handle: string) {
@@ -11,7 +15,9 @@ export function promptFor(handle: string) {
 
 4. If you haven't in the last few hours, also write the market brief: search X and the news for the last 24 to 48 hours (top crypto voices and the biggest stories) and call save_market_brief with the overall mood, a headline, a short summary, a line per coin, 3 to 6 voices and 3 to 6 news stories.
 
-Then tell me their lean on each token and the matching Gemini contract X Alpha returns.`;
+5. For their clearest call this week on ${ONCHAIN_TOKENS}, call get_onchain_flow with the post's time and side, to see whether big wallets traded the same way.
+
+Then tell me their lean on each token, the matching Gemini contract X Alpha returns, and whether big wallets agreed with their calls.`;
 }
 
 /** Grok Bot's routine: re-read every saved account, then write the market brief. Pasted into a scheduled Grok task. */
@@ -28,6 +34,9 @@ Keep it short, it is read at a glance:
 - voices: 3 to 6 top voices, each with handle, name, profile picture URL, followers, their take in one sentence in their words, mood and a link to the post
 - news: 3 to 6 stories, most important first, each with a short title, a one-sentence summary, link, source, when it broke, impact (bullish, bearish or mixed) and the coins it is about
 - suggested_accounts: 2 to 4 X accounts X Alpha isn't following yet that made clear, specific calls on these coins this week (named price levels, a clear side; no news bots), each with handle, name, profile picture URL, followers, one sentence on why, and the coins they call
+- next_run_at: when this scheduled task will run the routine next (ISO 8601 with time zone), and schedule: the schedule in a few words, like "Every day at 9:00 AM ET". X Alpha shows it as the next routine run.
 
-Then tell me the overall mood and anything that changed since the last run.`;
+3. Onchain check. For each account's clearest call this week on ${ONCHAIN_TOKENS}, call get_onchain_flow with the post's time and side to see whether big wallets traded the same way.
+
+Then tell me the overall mood, anything that changed since the last run, and any call the big wallets went against.`;
 }

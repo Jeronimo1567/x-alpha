@@ -17,6 +17,10 @@ export type MarketBrief = {
   coins: BriefCoin[]; voices: BriefVoice[]; news: BriefNews[];
   /** Accounts Grok Bot thinks are worth adding. Older briefs may not have it. */
   suggested?: SuggestedAccount[];
+  /** When Grok Bot's scheduled task will run the routine next, as it reported it. Older briefs may not have it. */
+  nextRunAt?: string;
+  /** The task's schedule in Grok Bot's words, like "Every day at 9:00 AM ET". */
+  schedule?: string;
 };
 
 const LOCAL_FILE = path.join(process.cwd(), ".data", "brief.json");
@@ -72,6 +76,9 @@ export function cleanBrief(raw: Record<string, unknown>): MarketBrief {
       avatar: cleanAvatar(a?.profile_image_url), followers: text(a?.followers, 20, "", false) || undefined,
       why: text(a?.why, 240, `suggested_accounts[${i}].why`), tokens: tokens(a?.tokens),
     })),
+    // Only a time in the future counts as the next run; anything else is dropped rather than failing the save.
+    nextRunAt: raw.next_run_at && Date.parse(String(raw.next_run_at)) > Date.now() ? new Date(String(raw.next_run_at)).toISOString() : undefined,
+    schedule: text(raw.schedule, 80, "", false) || undefined,
   };
 }
 
