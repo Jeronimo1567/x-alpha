@@ -5,7 +5,10 @@
 // 2. The account's odds: the market's odds curve shifted toward that target, by how strongly the account leans and
 //    by how much time is left before the contract settles (a call is judged over HORIZON_DAYS; a contract settling
 //    in a few hours only gets a small part of that move).
-// 3. Credibility: those odds blended with the market's, weighted by how often the account has been right on this token.
+// 3. Credibility: those odds blended with the market's, weighted by how often the account's calls on this token beat
+//    the market (alpha hit rate) at the horizon closest to the contract's time left. With fewer than MIN_SETTLED such
+//    calls it falls back to the plain hit rate. Beating the market is the fairer test: in a rally every bull is
+//    "right", but only an account that beats BTC (or the basket, for BTC) knows something the odds don't.
 // 4. Each contract on the lean's side is scored by Kelly growth (the long-run growth rate from betting the Kelly
 //    fraction at those odds). Kelly weighs edge against the chance of winning, so it doesn't just chase long shots.
 //    Contracts the account or the market gives less than MIN_CHANCE are skipped as long shots.
@@ -14,7 +17,7 @@ import type { Ladder, Match, Rung } from "./gemini";
 import type { Post } from "./sample";
 import type { TokenSymbol } from "./stance";
 import { extractTargets, type Target } from "./targets";
-import { HORIZON_DAYS, type Tally } from "./track";
+import { HORIZON_DAYS, horizonFor, MAIN_HORIZON, MIN_SETTLED, type HorizonKey, type Scorecard, type Tally } from "./track";
 
 export type Candidate = Match & {
   /** Chance the contract pays, by the account's view (after credibility). */
@@ -41,6 +44,8 @@ export type Pick = Candidate & {
   conviction: number;
   /** 0 to 1, how much the account's view counts against the market's. */
   credibility: number;
+  /** What the credibility was worked out from. */
+  credibilityBasis: Credibility;
   /** All contracts with a positive edge, best first. */
   candidates: Candidate[];
 };
@@ -53,16 +58,46 @@ const DAY = 86_400_000;
 /** Credibility for an account with no judged calls: it moves the odds a little, never a lot. */
 const PRIOR_CREDIBILITY = 0.3;
 
+export type Credibility = {
+  value: number;
+  /** "alpha": share of calls that beat the market; "raw": share that made money (too few benchmarked calls). */
+  basis: "alpha" | "raw";
+  horizon: HorizonKey;
+  /** Calls judged, and how many counted as hits on that basis. */
+  n: number; hits: number;
+};
+
 /**
- * How much an account's view counts against the market's, 0 to 1, from its judged calls on this token.
+ * How much an account's view counts against the market's, 0 to 1, from n judged calls with `hits` hits.
  * Half right counts 0, all right counts 1, and with few calls it is pulled toward PRIOR_CREDIBILITY:
- * 16/16 right → 0.92, no judged calls → 0.30, 1/1 → 0.53, 0/1 → 0.
+ * 16/16 → 0.92, no judged calls → 0.30, 1/1 → 0.53, 0/1 → 0.
  */
-export function credibilityOf(record: Tally | null): number {
-  const settled = record?.settled ?? 0, right = record?.right ?? 0;
+function fromHits(n: number, hits: number): number {
   const prior = 2;
-  const fromRecord = (settled ? (right / settled) * 2 - 1 : 0) * (settled / (settled + prior));
-  return Math.max(0, Math.min(1, fromRecord + PRIOR_CREDIBILITY * (prior / (settled + prior))));
+  const fromRecord = (n ? (hits / n) * 2 - 1 : 0) * (n / (n + prior));
+  return Math.max(0, Math.min(1, fromRecord + PRIOR_CREDIBILITY * (prior / (n + prior))));
+}
+
+/**
+ * Credibility at one horizon: the alpha hit rate (calls that beat the market) when at least MIN_SETTLED calls have
+ * a market move to compare; otherwise the raw hit rate at that horizon, or the 3-day record for a plain Tally.
+ */
+export function credibilityDetail(record: Tally | Scorecard | null, horizon: HorizonKey = MAIN_HORIZON): Credibility {
+  const h = record && "horizons" in record ? record.horizons[horizon] : null;
+  if (h && h.benchmarked >= MIN_SETTLED) return { value: fromHits(h.benchmarked, h.beat), basis: "alpha", horizon, n: h.benchmarked, hits: h.beat };
+  const n = h ? h.settled : record?.settled ?? 0, hits = h ? h.right : record?.right ?? 0;
+  return { value: fromHits(n, hits), basis: "raw", horizon: h ? horizon : MAIN_HORIZON, n, hits };
+}
+
+/** How much an account's view counts against the market's, 0 to 1 (see credibilityDetail). */
+export function credibilityOf(record: Tally | Scorecard | null, horizon: HorizonKey = MAIN_HORIZON): number {
+  return credibilityDetail(record, horizon).value;
+}
+
+/** The track-record horizon that matches a contract: the one closest to the time left before it settles. */
+export function horizonForLadder(ladder: Ladder, now = Date.now()): HorizonKey {
+  const left = new Date(ladder.expiry).getTime() - now;
+  return Number.isFinite(left) ? horizonFor(left) : MAIN_HORIZON;
 }
 
 /** Market chance of finishing at or above `strike`, straight between known rungs and flat beyond the ends. */
@@ -77,7 +112,7 @@ function chanceAt(rungs: (Rung & { chance: number })[], strike: number): number 
 
 export function bestContract(input: {
   ladder: Ladder; symbol: TokenSymbol; score: number | null; posts: Post[];
-  record: Tally | null; ref: number | null; now?: number;
+  record: Tally | Scorecard | null; ref: number | null; now?: number;
 }): PickResult {
   const { ladder, symbol, score, posts, record, ref } = input;
   const now = input.now ?? Date.now();
@@ -103,8 +138,9 @@ export function bestContract(input: {
   const accountPrice = E + conviction * timeScale * (T - E);
   const shift = accountPrice - E;
 
-  // 3. Credibility from the hit rate (see credibilityOf).
-  const credibility = credibilityOf(record);
+  // 3. Credibility from beating the market at the contract's horizon (see credibilityDetail).
+  const credibilityBasis = credibilityDetail(record, horizonForLadder(ladder, now));
+  const credibility = credibilityBasis.value;
 
   // 4. Score every contract on the lean's side.
   const candidates: Candidate[] = [];
@@ -129,5 +165,5 @@ export function bestContract(input: {
   const best = candidates[0];
   // Show the levels by how much they counted, not by how close they are to the strike.
   const used = sideTargets.map((t) => ({ ...t, share: t.weight / total }));
-  return { pick: { ...best, accountPrice, marketPrice: E, target: used[0] ?? null, used, conviction, credibility, candidates }, targets };
+  return { pick: { ...best, accountPrice, marketPrice: E, target: used[0] ?? null, used, conviction, credibility, credibilityBasis, candidates }, targets };
 }

@@ -1,9 +1,18 @@
 "use client";
 
-import { credibilityOf } from "@/lib/pick";
+import { credibilityDetail, type Credibility } from "@/lib/pick";
 import type { TokenSymbol } from "@/lib/stance";
-import type { Call, Tally } from "@/lib/track";
+import { HORIZONS, type Call, type HorizonKey, type Scorecard, type Tally } from "@/lib/track";
 import { label, signed } from "@/components/shared";
+
+/** What the confidence rests on, in one line: calls that beat the market, or (too few of those) calls that made money. */
+function basisText(c: Credibility, symbol: TokenSymbol) {
+  const over = HORIZONS.find((h) => h.key === c.horizon)!.label;
+  if (!c.n) return `No ${symbol} calls old enough to judge over ${over} yet`;
+  return c.basis === "alpha"
+    ? `${c.hits} of ${c.n} past ${symbol} calls beat the market over ${over}`
+    : `${c.hits} of ${c.n} past ${symbol} calls right over ${over}${c.n < 5 ? " · few calls, held back" : ""}`;
+}
 
 /** Plain-language level for how much an account's view counts. */
 export function confidenceLevel(c: number) {
@@ -26,11 +35,14 @@ export function ConfidenceMeter({ value }: { value: number }) {
  * How much the account's past calls on this token earn its view, shown before the odds it moves:
  * a level and meter, one dot per judged call (filled right, hollow wrong), and the count.
  */
-export function Confidence({ record, calls, symbol }: { record: Tally | null; calls: Call[]; symbol: TokenSymbol }) {
-  const value = credibilityOf(record);
+export function Confidence({ record, calls, symbol, horizon }: { record: Tally | Scorecard | null; calls: Call[]; symbol: TokenSymbol; horizon?: HorizonKey }) {
+  const detail = credibilityDetail(record, horizon);
+  const value = detail.value;
   const level = confidenceLevel(value);
-  const settled = record?.settled ?? 0, right = record?.right ?? 0;
-  const judged = calls.filter((c) => c.settled).sort((a, b) => a.postedAt - b.postedAt);
+  const alpha = detail.basis === "alpha";
+  // One dot per judged call at the horizon used: filled when it was a hit on that basis.
+  const judged = calls.map((c) => ({ c, g: c.horizons[detail.horizon] })).filter(({ g }) => g?.settled && (!alpha || g.alpha !== null)).sort((a, b) => a.c.postedAt - b.c.postedAt)
+    .map(({ c, g }) => ({ c, hit: alpha ? g!.alpha! > 0 : g!.gain > 0, by: alpha ? g!.alpha! : g!.gain }));
   const share = `${Math.round(value * 100)}%`;
 
   return (
@@ -45,28 +57,28 @@ export function Confidence({ record, calls, symbol }: { record: Tally | null; ca
         </span>
       </div>
       {judged.length > 0 && (
-        <div className="flex flex-wrap gap-1" aria-label={`${right} right, ${settled - right} wrong`}>
-          {judged.map((c) => (
+        <div className="flex flex-wrap gap-1" aria-label={`${detail.hits} hits, ${detail.n - detail.hits} misses`}>
+          {judged.map(({ c, hit, by }) => (
             <a key={c.id} href={c.url} target="_blank" rel="noreferrer" onClick={(e) => { if (!c.url) e.preventDefault(); }}
-              title={`${c.right ? "Right" : "Wrong"} ${signed(c.gain)}: ${c.text}`}
-              className={`size-2.5 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring ${c.right ? "bg-foreground" : "ring-1 ring-foreground/50 ring-inset"}`} />
+              title={`${alpha ? (hit ? "Beat the market" : "Trailed the market") : hit ? "Right" : "Wrong"} ${signed(by)}: ${c.text}`}
+              className={`size-2.5 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring ${hit ? "bg-foreground" : "ring-1 ring-foreground/50 ring-inset"}`} />
           ))}
         </div>
       )}
       <p className="text-xs text-muted-foreground">
-        {settled ? <>{right} of {settled} past {symbol} calls right{settled < 5 && " · few calls, held back"}</> : `No ${symbol} calls old enough to judge yet`}
+        {basisText(detail, symbol)}
       </p>
     </div>
   );
 }
 
 /** The same confidence, small enough to sit inside the source post: meter, percentage and level, details on hover. */
-export function ConfidenceBadge({ record, symbol }: { record: Tally | null; symbol: TokenSymbol }) {
-  const value = credibilityOf(record);
+export function ConfidenceBadge({ record, symbol, horizon }: { record: Tally | Scorecard | null; symbol: TokenSymbol; horizon?: HorizonKey }) {
+  const c = credibilityDetail(record, horizon);
+  const value = c.value;
   const level = confidenceLevel(value);
-  const settled = record?.settled ?? 0, right = record?.right ?? 0;
   const share = `${Math.round(value * 100)}%`;
-  const detail = settled ? `${right} of ${settled} past ${symbol} calls right${settled < 5 ? " · few calls, held back" : ""}` : `No ${symbol} calls old enough to judge yet`;
+  const detail = basisText(c, symbol);
   return (
     <span className="inline-flex items-center gap-2 rounded-lg bg-foreground/[0.05] py-1 pr-2.5 pl-2 text-xs ring-1 ring-foreground/10 ring-inset" title={`Confidence from past calls: ${detail}`} aria-label={`Confidence ${level}, ${share}. ${detail}`}>
       <span className="text-muted-foreground">Confidence</span>

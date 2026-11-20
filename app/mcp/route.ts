@@ -7,7 +7,7 @@ import { cleanAvatar, cleanHandle, cleanPosts, getReading, saveReading, toAccoun
 import { allPrices } from "@/lib/prices";
 import { lean, stances, TOKEN_NAMES, TOKENS, type TokenSymbol } from "@/lib/stance";
 import { bestContract } from "@/lib/pick";
-import { HORIZON_DAYS, trackRecord } from "@/lib/track";
+import { HORIZON_DAYS, HORIZONS, marketVerdict, MIN_SETTLED, trackRecord, type Scorecard } from "@/lib/track";
 import { postImpact } from "@/lib/impact";
 import { pricesAround } from "@/lib/prices";
 import { loadSwaps, ONCHAIN } from "@/lib/swaps";
@@ -126,8 +126,21 @@ const TOOLS = [
   },
   {
     name: "get_account_reading",
-    description: "The reading X Alpha has stored for an X account: when it was last analyzed, its lean per token this week and last week, its track record (how often its past calls were right), and the matching Gemini contracts. Use it to compare against a new week.",
+    description: "The reading X Alpha has stored for an X account: when it was last analyzed, its lean per token this week and last week, its track record (how often its past calls were right, and how often they beat the market at 1h, 1d, 3d and 7d), and the matching Gemini contracts with how much the account's view was trusted. Use it to compare against a new week.",
     inputSchema: { type: "object", properties: { handle: { type: "string", description: "The X username, like @example." } }, required: ["handle"], additionalProperties: false },
+  },
+  {
+    name: "get_track_record",
+    description:
+      "How an account's past calls held up against the market, at 1 hour, 1 day, 3 days and 7 days after each post. For each horizon: calls settled, plain hit rate (made money), alpha hit rate (beat the market), mean alpha per call and a t-stat. The market is BTC for altcoin calls and an equal-weight basket of all tracked coins for BTC calls. Also says where the account's edge peaks (edge decay) and gives one verdict: beats, rides (right only because the market moved), trails, unclear or few. Use it to judge how much an account's view should count before trusting a contract pick.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        handle: { type: "string", description: "The X username, like @example." },
+        symbol: { ...symbolProp, description: `Only calls on this token (${COINS}). Leave out for every call.` },
+      },
+      required: ["handle"], additionalProperties: false,
+    },
   },
   {
     name: "get_market_odds",
@@ -166,6 +179,24 @@ const summarize = (l: Ladder) => ({
   levels: l.rungs.filter((r) => r.chance !== null).map((r) => ({ at_or_above: r.strike, chance: round(r.chance) })),
 });
 
+const BENCHMARK_NOTE = "alpha = the call's return minus the market's move over the same window, in the call's direction. Market: BTC for altcoin calls; an equal-weight basket of all tracked coins for BTC calls.";
+
+/** One scorecard against the market, per horizon, shaped for an agent. */
+function vsMarket(x: Scorecard) {
+  const v = marketVerdict(x);
+  return {
+    verdict: v.kind, verdict_horizon: v.horizon,
+    edge_peaks_at: x.decay.peak, edge_gone_by: x.decay.fadesBy, edge_tentative: x.decay.tentative,
+    by_horizon: HORIZONS.map((h) => {
+      const t = x.horizons[h.key];
+      return {
+        horizon: h.key, calls_settled: t.settled, hit_rate: round(t.hitRate), alpha_hit_rate: round(t.alphaHitRate),
+        mean_gain: round(t.meanGain, 4), mean_alpha: round(t.meanAlpha, 4), t_stat: round(t.tStat), significance: t.signal === "too few" ? `n too small (<${MIN_SETTLED})` : t.signal,
+      };
+    }),
+  };
+}
+
 /** Lean per token plus the matching Gemini contract for each clear lean. */
 async function report(r: Reading, origin: string) {
   const prices = await allPrices().catch(() => ({} as Awaited<ReturnType<typeof allPrices>>));
@@ -185,6 +216,11 @@ async function report(r: Reading, origin: string) {
             contract: `${m.side === "yes" ? "Yes" : "No"} on "${s.symbol} ${m.rung.label}"`, market: ladder.title, settles: ladder.expiry,
             cost_per_1_dollar_payout: m.price, market_chance_of_paying: round(m.marketChance), account_chance_of_paying: round(m.accountChance),
             edge_per_dollar: round(m.edge), account_expected_price: round(m.accountPrice, 0),
+            credibility: {
+              weight_0_to_1: round(m.credibility), horizon: m.credibilityBasis.horizon,
+              basis: m.credibilityBasis.basis === "alpha" ? "share of calls that beat the market" : `share of calls that made money (fewer than ${MIN_SETTLED} could be compared with the market)`,
+              calls: m.credibilityBasis.n, hits: m.credibilityBasis.hits,
+            },
             based_on: m.used.length
               ? m.used.map((t) => ({ level: t.price, direction: t.dir, weight_share: round(t.share), quote: t.quote, post: t.url ?? null }))
               : "The account's lean and typical move (no price level named).",
@@ -205,9 +241,9 @@ async function report(r: Reading, origin: string) {
       calls_judged: x.settled, calls_right: x.right, avg_gain_following_calls: round(x.avgGain, 4), calls_still_open: x.open,
     });
     track_record = {
-      method: `Each bullish or bearish post is judged on the price move over the ${HORIZON_DAYS} days after it (Gemini hourly prices).`,
-      overall: fmt(t.overall),
-      by_token: t.byToken.filter((b) => b.settled + b.open > 0).map((b) => ({ token: b.token, ...fmt(b) })),
+      method: `Each bullish or bearish post is judged on the price move over the ${HORIZON_DAYS} days after it (Gemini hourly prices). vs_market grades the same calls at 1h, 1d, 3d and 7d against the market: ${BENCHMARK_NOTE}`,
+      overall: { ...fmt(t.overall), vs_market: vsMarket(t.overall) },
+      by_token: t.byToken.filter((b) => b.settled + b.open > 0).map((b) => ({ token: b.token, ...fmt(b), vs_market: vsMarket(b) })),
     };
   } catch { /* prices are optional here */ }
   return {
@@ -263,6 +299,25 @@ async function callTool(name: string, args: Record<string, unknown>, ctx: { canW
     if (args.stance !== "bullish" && args.stance !== "bearish") throw new Error("stance must be bullish or bearish");
     return onchainFlow(symbol as TokenSymbol, at, args.stance);
   }
+  if (name === "get_track_record") {
+    const handle = cleanHandle(args.handle);
+    const r = await getReading(handle);
+    if (!r) return { handle: "@" + handle, message: "No reading stored for this account yet. Use save_account_reading first." };
+    const symbol = args.symbol == null ? null : String(args.symbol).toUpperCase();
+    if (symbol !== null && !(TOKENS as readonly string[]).includes(symbol)) throw new Error(`symbol must be one of ${TOKENS.join(", ")}`);
+    const t = trackRecord(toAccount(r).posts, await allPrices());
+    const x = symbol ? t.byToken.find((b) => b.token === symbol)! : t.overall;
+    const calls = t.calls.filter((c) => !symbol || c.token === symbol);
+    return {
+      handle: "@" + r.handle, token: symbol ?? "all", calls: calls.length, calls_right_3d: x.right, calls_settled_3d: x.settled,
+      method: BENCHMARK_NOTE, ...vsMarket(x),
+      recent_calls: calls.slice(0, 10).map((c) => ({
+        token: c.token, stance: c.stance, posted_at: new Date(c.postedAt).toISOString(), post: c.url ?? null,
+        ...Object.fromEntries(Object.entries(c.horizons).map(([k, g]) => [k, { gain: round(g.gain, 4), market: round(g.benchmark, 4), alpha: round(g.alpha, 4), settled: g.settled }])),
+      })),
+      note: `Few calls make every number noisy: treat anything marked "n too small" as a hint, and a t_stat under 2 as weak. Calls posted close together overlap, so the t_stat flatters busy accounts.`,
+    };
+  }
   if (name === "get_account_reading") {
     const handle = cleanHandle(args.handle);
     const r = await getReading(handle);
@@ -302,11 +357,12 @@ async function handle(msg: Rpc, ctx: { canWrite: boolean; origin: string }) {
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: {} },
-        serverInfo: { name: "x-alpha", version: "0.5.0" },
+        serverInfo: { name: "x-alpha", version: "0.6.0" },
         instructions: [
           `X Alpha turns an X account's recent posts into a lean per crypto token (${COINS}) and matches it to live Gemini prediction market odds. Nothing here places trades.`,
           "One account: read its posts on X yourself, then call save_account_reading.",
           "The routine (usually a scheduled task): re-read every saved account with save_account_reading, then call save_market_brief with how crypto looks overall (top voices on X, the big news, accounts worth adding). In save_market_brief, always send next_run_at (when your scheduled task runs next, ISO 8601) and schedule, so the dashboard shows when fresh data is due.",
+          "Track record: get_track_record says how an account's past calls did against the market (BTC for altcoins, a coin basket for BTC) at 1h, 1d, 3d and 7d. An account that is mostly right only because everything rallied shows as \"rides\"; weigh it below one that \"beats\" the market. X Alpha's contract picks already weight each account by this.",
           `Onchain check: for an account's clearest recent calls on ${Object.keys(ONCHAIN).join(", ")}, call get_onchain_flow with the post's time and side to see whether big wallets traded the same way (swaps of $10k or more from X Alpha's QuickNode Streams). It only has swaps from when the Streams started, so a call with no swaps yet is not a finding.`,
         ].join("\n\n"),
       });

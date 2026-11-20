@@ -17,7 +17,9 @@ export function promptFor(handle: string) {
 
 5. For their clearest call this week on ${ONCHAIN_TOKENS}, call get_onchain_flow with the post's time and side, to see whether big wallets traded the same way.
 
-Then tell me their lean on each token, the matching Gemini contract X Alpha returns, and whether big wallets agreed with their calls.`;
+6. Call get_track_record for @${handle} to see whether their past calls beat the market (BTC, or a coin basket for BTC calls) at 1h, 1d, 3d and 7d, not just whether they made money.
+
+Then tell me their lean on each token, the matching Gemini contract X Alpha returns, whether big wallets agreed with their calls, and whether their record beats the market or just rides it (and at which horizon their edge peaks).`;
 }
 
 /** Grok Bot's routine: re-read every saved account, then write the market brief. Pasted into a scheduled Grok task. */
@@ -38,5 +40,7 @@ Keep it short, it is read at a glance:
 
 3. Onchain check. For each account's clearest call this week on ${ONCHAIN_TOKENS}, call get_onchain_flow with the post's time and side to see whether big wallets traded the same way.
 
-Then tell me the overall mood, anything that changed since the last run, and any call the big wallets went against.`;
+4. Track record. For each account, call get_track_record and note its verdict (beats, rides, trails, unclear or few) and where its edge peaks.
+
+Then tell me the overall mood, anything that changed since the last run, any call the big wallets went against, and which accounts actually beat the market (not just rode it).`;
 }

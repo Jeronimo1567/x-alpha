@@ -22,13 +22,16 @@ import { promptFor } from "@/components/grok-prompts";
 import { card, date, displayName, label, neutralAccent, sideOf, signed } from "@/components/shared";
 import type { Account } from "@/lib/sample";
 import { stances, type TokenSymbol } from "@/lib/stance";
-import { followCurve, leanHistory, trackRecord, type PriceSeries, type Tally } from "@/lib/track";
+import { BeatMarketBadge } from "@/components/alpha-record";
+import { followCurve, leanHistory, MAIN_HORIZON, trackRecord, type PriceSeries, type Scorecard } from "@/lib/track";
 
 type Prices = Partial<Record<TokenSymbol, PriceSeries>> | null;
 
 /** Everything a profile card or compare row shows, worked out once per account. */
 export type ProfileSummary = {
-  account: Account; overall: Tally | null; curve: { values: number[]; dates: number[] } | null; total: number | null;
+  account: Account; overall: Scorecard | null; curve: { values: number[]; dates: number[] } | null; total: number | null;
+  /** Following every call, minus what the market did over the same windows (3 days per call), in percent. */
+  alphaTotal: number | null;
   leans: { symbol: TokenSymbol; score: number; side: "bullish" | "bearish" | null }[];
   /** Daily lean on their most-posted token over the last 14 days. */
   history: { symbol: TokenSymbol; values: (number | null)[]; dates: number[] } | null;
@@ -44,7 +47,11 @@ export function summarize(account: Account, prices: Prices, now = 0): ProfileSum
     .map((s) => ({ symbol: s.symbol, score: s.score!, side: sideOf(s.score) as "bullish" | "bearish" | null }));
   const main = leans[0]?.symbol;
   const history = main && now ? { symbol: main, ...leanHistory(account.posts, main, 14, now) } : null;
-  return { account, overall: record?.overall ?? null, curve, total: curve ? curve.values[curve.values.length - 1] : null, leans, history };
+  const alphaCurve = record ? followCurve(record.calls, "alpha") : null;
+  return {
+    account, overall: record?.overall ?? null, curve, total: curve ? curve.values[curve.values.length - 1] : null,
+    alphaTotal: alphaCurve ? alphaCurve.values[alphaCurve.values.length - 1] : null, leans, history,
+  };
 }
 
 const handleOf = (raw: string) => raw.trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, "").split(/[/?#\s]/)[0].toLowerCase();
@@ -184,10 +191,16 @@ function ProfileCard({ s, selected, onToggle, onOpen, onRemove }: { s: ProfileSu
       <LeanSparkline s={s} />
 
       {s.total !== null && s.overall && s.overall.settled + s.overall.open > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Following their calls: <span className={`font-medium ${s.total > 0 ? "text-good" : s.total < 0 ? "text-bad" : "text-foreground"}`}>{signed(s.total / 100)}</span>
-          {s.overall.settled > 0 && <> · {s.overall.right}/{s.overall.settled} right</>}
-        </p>
+        <div className="grid gap-1.5">
+          <p className="text-xs text-muted-foreground">
+            Following their calls: <span className={`font-medium ${s.total > 0 ? "text-good" : s.total < 0 ? "text-bad" : "text-foreground"}`}>{signed(s.total / 100)}</span>
+            {s.alphaTotal !== null && <> · <span title="The same calls minus what the market did over each call's 3 days">vs market <span className={`font-medium ${s.alphaTotal > 0 ? "text-good" : s.alphaTotal < 0 ? "text-bad" : "text-foreground"}`}>{signed(s.alphaTotal / 100)}</span></span></>}
+          </p>
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <BeatMarketBadge record={s.overall} />
+            {s.overall.settled > 0 && <span>{s.overall.right}/{s.overall.settled} right{s.overall.horizons[MAIN_HORIZON].benchmarked > 0 && <> · {s.overall.horizons[MAIN_HORIZON].beat}/{s.overall.horizons[MAIN_HORIZON].benchmarked} beat it</>}</span>}
+          </p>
+        </div>
       )}
 
       {/* Remove confirmation: covers the card; holding the button removes it, Cancel or Escape backs out. */}

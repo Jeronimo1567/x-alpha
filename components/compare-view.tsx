@@ -9,12 +9,13 @@ import { ConfidenceMeter } from "@/components/confidence";
 import { Market } from "@/components/market";
 import { PriceCallsChart } from "@/components/price-calls-chart";
 import { ContractTicket, ContractTicketEmpty, OtherMarkets, SourceTweet, type OtherMarket } from "@/components/contract-ticket";
-import { card, cents, displayName, label, neutralAccent, pct, shortWhen, sideOf, signed, Tag, usd, useOdds } from "@/components/shared";
+import { card, cents, displayName, label, neutralAccent, pct, shortWhen, sideOf, Tag, usd, useOdds } from "@/components/shared";
 import type { Ladder, Match } from "@/lib/gemini";
-import { bestContract, credibilityOf, type PickResult } from "@/lib/pick";
+import { BeatMarketBadge, HorizonRow } from "@/components/alpha-record";
+import { bestContract, credibilityDetail, horizonForLadder, type PickResult } from "@/lib/pick";
 import type { Account } from "@/lib/sample";
 import { stances, TOKEN_NAMES, TOKENS, type TokenStance, type TokenSymbol } from "@/lib/stance";
-import { trackRecord, type Call, type PriceSeries, type TokenRecord } from "@/lib/track";
+import { MAIN_HORIZON, MIN_SETTLED, trackRecord, type Call, type PriceSeries, type TokenRecord } from "@/lib/track";
 
 /** Account chips are taller so the profile picture fits, same as the account row in the single view. */
 const accountChips = { ...neutralAccent, "--control-height-sm": "38px", "--text-sm": "0.875rem", "--space-2": "0.625rem" } as CSSProperties;
@@ -28,9 +29,17 @@ type Side = {
   leaning: TokenSymbol[];
 };
 
-/** Better record on this token: higher hit rate, then higher average gain. Null when neither has a judged call or they tie. */
+/**
+ * Better record on this token. When both have MIN_SETTLED calls with a market move to compare: higher share that beat
+ * the market, then higher mean alpha. Otherwise: higher hit rate, then higher average gain. Null when neither has a
+ * judged call or they tie.
+ */
 function leader(a: Side, b: Side): 0 | 1 | null {
-  const score = (s: Side) => (s.record && s.record.settled > 0 ? [s.record.right / s.record.settled, s.record.avgGain ?? 0] : null);
+  const h = (s: Side) => s.record?.horizons[MAIN_HORIZON];
+  const alpha = (h(a)?.benchmarked ?? 0) >= MIN_SETTLED && (h(b)?.benchmarked ?? 0) >= MIN_SETTLED;
+  const score = (s: Side) => alpha
+    ? [h(s)!.alphaHitRate!, h(s)!.meanAlpha!]
+    : s.record && s.record.settled > 0 ? [s.record.right / s.record.settled, s.record.avgGain ?? 0] : null;
   const sa = score(a), sb = score(b);
   if (!sa && !sb) return null;
   if (!sb) return 0;
@@ -199,7 +208,12 @@ function Summary({ A, B, symbol }: { A: Side; B: Side; symbol: TokenSymbol }) {
     : hasA || hasB
       ? (() => { const [has, not] = hasA ? [A, B] : [B, A]; return <>{displayName(has.account)} is <LeanWord s={has} /> on {symbol} this week; {displayName(not.account)} hasn&apos;t posted about it.</>; })()
       : <>Neither {na} nor {nb} posted about {symbol} this week.</>;
-  const rec = (s: Side) => (s.record && s.record.settled > 0 ? `${s.record.right}/${s.record.settled}` : null);
+  // "7/9" right, plus how many of those beat the market when any could be compared.
+  const rec = (s: Side) => {
+    if (!s.record || s.record.settled === 0) return null;
+    const h = s.record.horizons[MAIN_HORIZON];
+    return `${s.record.right}/${s.record.settled}${h.benchmarked ? ` (${h.beat} beat the market)` : ""}`;
+  };
   const ra = rec(A), rb = rec(B);
   const record = ra && rb ? `${na} is ${ra} on ${symbol} calls, ${nb} ${rb}.`
     : ra || rb ? `${ra ? na : nb} is ${ra ?? rb} on ${symbol} calls; ${ra ? nb : na} has none judged yet.`
@@ -218,11 +232,14 @@ function SidePanel({ s, symbol, ladder, leads, loading, unavailable, current, on
 }) {
   const live = !loading && !unavailable;
   // Lean is already in the face-off and the record in the sentence above, so this is just three numbers.
-  const cred = credibilityOf(s.record);
+  // Confidence at the horizon the chosen contract settles over, as the pick uses it.
+  const detail = s.picked?.pick?.credibilityBasis ?? credibilityDetail(s.record, ladder ? horizonForLadder(ladder) : undefined);
+  const cred = detail.value;
+  const main = s.record?.horizons[MAIN_HORIZON];
   const stats: [string, React.ReactNode, string?][] = [
     ["Right on " + symbol, s.record && s.record.settled > 0 ? `${s.record.right}/${s.record.settled}` : "–"],
-    ["Avg per call", s.record?.avgGain != null ? signed(s.record.avgGain) : "–", s.record?.avgGain != null ? (s.record.avgGain > 0 ? "text-good" : s.record.avgGain < 0 ? "text-bad" : "") : ""],
-    ["Confidence", <span key="c" className="flex items-center gap-1.5" title="How much their view counts against the market's, from past calls on this token"><ConfidenceMeter value={cred} />{Math.round(cred * 100)}%</span>],
+    ["Beat the market", main && main.benchmarked > 0 ? `${main.beat}/${main.benchmarked}` : "–", main?.meanAlpha != null ? (main.meanAlpha > 0 ? "text-good" : main.meanAlpha < 0 ? "text-bad" : "") : ""],
+    ["Confidence", <span key="c" className="flex items-center gap-1.5" title={`How much their view counts against the market's: ${detail.basis === "alpha" ? `${detail.hits} of ${detail.n} calls beat the market` : `${detail.hits} of ${detail.n} calls right (too few to compare with the market)`} over ${detail.horizon}`}><ConfidenceMeter value={cred} />{Math.round(cred * 100)}%</span>],
   ];
   const m = s.picked?.pick ?? null;
   return (
@@ -235,6 +252,7 @@ function SidePanel({ s, symbol, ladder, leads, loading, unavailable, current, on
         </div>
         {leads && <span className="shrink-0 rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[11px] font-medium">Better record</span>}
       </div>
+      <div className="-mt-1"><BeatMarketBadge record={s.record} /></div>
 
       <dl className="grid grid-cols-3 gap-2">
         {stats.map(([k, v, tone]) => (
@@ -244,6 +262,8 @@ function SidePanel({ s, symbol, ladder, leads, loading, unavailable, current, on
           </div>
         ))}
       </dl>
+
+      <HorizonRow record={s.record} token={symbol} />
 
       <div className="grid gap-2 border-t border-foreground/[0.07] pt-3">
         <div className={label}>Best contract</div>

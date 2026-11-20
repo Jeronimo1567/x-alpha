@@ -10,6 +10,7 @@ import { CompareView } from "@/components/compare-view";
 import { Dashboard } from "@/components/dashboard";
 import { AccountOnchain } from "@/components/onchain";
 import { Confidence, ConfidenceBadge } from "@/components/confidence";
+import { MarketRecordCard } from "@/components/alpha-record";
 import { Market } from "@/components/market";
 import { PriceCallsChart } from "@/components/price-calls-chart";
 import { ContractTicket, ContractTicketEmpty, OtherMarkets, SourceTweet, type OtherMarket } from "@/components/contract-ticket";
@@ -20,10 +21,10 @@ import { XAlphaLogo } from "@/components/x-alpha-logo";
 import { DAY_MS, OddsState, card, cents, clock, date, label, neutralAccent, pct, sideOf, signed, stamp, usd, useOdds, useStreams, when, displayName } from "@/components/shared";
 
 import type { Ladder, Match } from "@/lib/gemini";
-import { bestContract, type Pick, type PickResult } from "@/lib/pick";
+import { bestContract, horizonForLadder, type Pick, type PickResult } from "@/lib/pick";
 import { ACCOUNTS, type Account, type Stance } from "@/lib/sample";
 import { stances, TOKEN_NAMES, type TokenStance, type TokenSymbol } from "@/lib/stance";
-import { HORIZON_DAYS, trackRecord, type Call, type PriceSeries, type Tally, type TokenRecord } from "@/lib/track";
+import { trackRecord, type Call, type HorizonKey, type PriceSeries, type Scorecard, type Tally, type TokenRecord } from "@/lib/track";
 
 const HIDDEN_KEY = "x-alpha-hidden-samples";
 /** The Streams count as live while a real swap has arrived this recently. Large swaps on Ethereum come every few minutes. */
@@ -120,6 +121,8 @@ export default function Page() {
     ? ladders.flatMap((l, index) => { if (l === ladder) return []; const p = pickOn(l).pick; return p ? [{ index, ladder: l, pick: p }] : []; })
     : [];
   const match = best?.pick ?? null;
+  // The track-record horizon the pick's credibility used: the one closest to the chosen contract's time left.
+  const horizon = best?.pick?.credibilityBasis.horizon ?? (ladder && now ? horizonForLadder(ladder, now) : undefined);
 
   const lastRun = fromGrok.length ? Math.max(...fromGrok.map((a) => Date.parse(a.analyzedAt!))) : null;
   // Grok Bot says when its scheduled task runs next (with the market brief). Without that, the next run is
@@ -235,10 +238,12 @@ export default function Page() {
 
         <PriceCallsChart symbol={symbol} series={prices?.[symbol]} sources={singleSource} />
 
-        <ContractCard account={account} symbol={symbol} stance={stance} handle={displayName(account)} result={best} ladder={ladder} odds={odds} record={tokenRecord} calls={tokenCalls} current={prices?.[symbol]?.at(-1)?.[1] ?? null}
+        <ContractCard account={account} symbol={symbol} stance={stance} handle={displayName(account)} result={best} ladder={ladder} odds={odds} record={tokenRecord} calls={tokenCalls} current={prices?.[symbol]?.at(-1)?.[1] ?? null} horizon={horizon}
           others={otherMarkets} onLadder={setLadderIndex}
           leaning={all.filter((t) => t.symbol !== symbol && sideOf(t.score)).map((t) => t.symbol)} onPick={pick} />
       </section>
+
+      <MarketRecordCard key={account.handle} record={record} symbol={symbol} />
 
       <AccountOnchain key={account.handle + symbol} account={account} symbol={symbol} />
 
@@ -321,9 +326,9 @@ function Verdict({ symbol, stance, handle, tally, pricesReady, match, ladder, od
  * The best Gemini contract for the account's view (lib/pick): what it costs and pays, the account's odds next to
  * the market's, the price levels from its posts that drove the pick, and the runner-ups.
  */
-function ContractCard({ account, symbol, stance, handle, result, ladder, odds, record, calls, current, others, onLadder, leaning, onPick }: {
+function ContractCard({ account, symbol, stance, handle, result, ladder, odds, record, calls, current, horizon, others, onLadder, leaning, onPick }: {
   account: Account; symbol: TokenSymbol; stance: TokenStance; handle: string; result: PickResult | null; ladder: Ladder | null; odds: OddsState;
-  record: Tally | null; calls: Call[]; current: number | null; others: OtherMarket[]; onLadder: (i: number) => void; leaning: TokenSymbol[]; onPick: (t: TokenSymbol) => void;
+  record: Scorecard | null; horizon?: HorizonKey; calls: Call[]; current: number | null; others: OtherMarket[]; onLadder: (i: number) => void; leaning: TokenSymbol[]; onPick: (t: TokenSymbol) => void;
 }) {
   const side = sideOf(stance.score);
   const match = result?.pick ?? null;
@@ -345,7 +350,7 @@ function ContractCard({ account, symbol, stance, handle, result, ladder, odds, r
           {odds.status === "loading" || odds.status === "error" ? null : <OtherMarkets others={others} leaning={leaning} onLadder={onLadder} onCoin={onPick} />}
         </ContractTicketEmpty>
         {/* Shown here too: low confidence is often why there's no pick. */}
-        {side && <div><Confidence record={record} calls={calls} symbol={symbol} /></div>}
+        {side && <div><Confidence record={record} calls={calls} symbol={symbol} horizon={horizon} /></div>}
       </div>
     );
   }
@@ -364,7 +369,7 @@ function ContractCard({ account, symbol, stance, handle, result, ladder, odds, r
       {/* The contract, laid out like Gemini's own market card, with the post behind it alongside. */}
       <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
         <ContractTicket symbol={symbol} ladder={ladder} side={match.side} rung={match.rung} price={match.price} current={current} live={odds.status === "ready"} />
-        <SourceTweet fill account={account} pick={match} symbol={symbol} badge={<ConfidenceBadge record={record} symbol={symbol} />} />
+        <SourceTweet fill account={account} pick={match} symbol={symbol} badge={<ConfidenceBadge record={record} symbol={symbol} horizon={horizon} />} />
       </div>
 
       {/* Chance this contract pays: by the account's view, then by Gemini's market. */}
