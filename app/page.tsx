@@ -8,9 +8,8 @@ import SegmentedControl from "@/components/arc/segmented-control/segmented-contr
 import { CompareTable } from "@/components/compare-table";
 import { CompareView } from "@/components/compare-view";
 import { Dashboard } from "@/components/dashboard";
-import { AccountOnchain } from "@/components/onchain";
 import { Confidence, ConfidenceBadge } from "@/components/confidence";
-import { MarketRecordCard } from "@/components/alpha-record";
+import { Evidence } from "@/components/evidence";
 import { Market } from "@/components/market";
 import { PriceCallsChart } from "@/components/price-calls-chart";
 import { ContractTicket, ContractTicketEmpty, OtherMarkets, SourceTweet, type OtherMarket } from "@/components/contract-ticket";
@@ -189,7 +188,7 @@ export default function Page() {
       {mode === "dashboard" ? (
         <Dashboard accounts={accounts} prices={prices} now={now} onSaved={loadReadings} onRemove={removeAccount}
           onOpen={(h) => { setChosen(h); setPicked(null); setLadderIndex(null); setMode("account"); }}
-          onCompare={(hs) => { setCompareSet(hs); setPair([hs[0], hs[1]]); setMode("compare"); }} />
+ />
       ) : mode === "compare" && compareSet && pair ? (<>
         {compareSet.length > 2 && (
           <CompareTable now={now} accounts={accounts.filter((a) => compareSet.includes(a.handle))} prices={prices} pair={pair} onPair={setPair} />
@@ -201,7 +200,6 @@ export default function Page() {
       {/* Accounts Grok Bot read stay in view; the invented samples fold behind "+N more". */}
       {/* Same card as Compare's "Choose accounts" box. */}
       <nav aria-label="Accounts" className={`${card} grid gap-1.5`} style={{ ...neutralAccent, "--control-height-sm": "38px", "--text-sm": "0.875rem", "--space-2": "0.625rem" } as React.CSSProperties}>
-        <span className={label}>Account</span>
         <ChipGroup label="Account" multiple={false}
           maxVisible={fromGrok.length > 0 ? fromGrok.length : Infinity}
           value={[account.handle]}
@@ -243,9 +241,8 @@ export default function Page() {
           leaning={all.filter((t) => t.symbol !== symbol && sideOf(t.score)).map((t) => t.symbol)} onPick={pick} />
       </section>
 
-      <MarketRecordCard key={account.handle} record={record} symbol={symbol} />
-
-      <AccountOnchain key={account.handle + symbol} account={account} symbol={symbol} />
+      {/* Were they right, did they beat the market, did big wallets agree: one tab each. */}
+      <Evidence account={account} record={record} symbol={symbol} />
 
       <section>
         <Market symbol={symbol} odds={odds} ladders={ladders} ladder={ladder} onLadder={setLadderIndex} marks={[{ account, match }]} />
@@ -354,15 +351,6 @@ function ContractCard({ account, symbol, stance, handle, result, ladder, odds, r
       </div>
     );
   }
-  const yes = match.side === "yes";
-  const tone = yes ? "bg-good" : "bg-bad";
-  const odd = (name: string, value: number, fill: string) => (
-    <div className="grid grid-cols-[6.5rem_1fr_2.5rem] items-center gap-2 text-xs">
-      <span className="truncate text-muted-foreground">{name}</span>
-      <span className="h-1.5 rounded-full bg-foreground/[0.07]"><span className={`block h-1.5 rounded-full ${fill}`} style={{ width: pct(value) }} /></span>
-      <span className="text-right font-mono tabular-nums">{pct(value)}</span>
-    </div>
-  );
   return (
     <div className="grid gap-3 rounded-lg p-4 ring-1 ring-foreground/10">
       {head}
@@ -372,14 +360,6 @@ function ContractCard({ account, symbol, stance, handle, result, ladder, odds, r
         <SourceTweet fill account={account} pick={match} symbol={symbol} badge={<ConfidenceBadge record={record} symbol={symbol} horizon={horizon} />} />
       </div>
 
-      {/* Chance this contract pays: by the account's view, then by Gemini's market. */}
-      <div className="grid gap-1.5 border-t border-foreground/[0.07] pt-3">
-        {odd(handle.length > 9 ? "Their odds" : `${handle}'s odds`, match.accountChance, tone)}
-        {odd("Market's odds", match.marketChance, "bg-foreground/40")}
-        <div className="text-xs text-muted-foreground">
-          If {handle.length > 12 ? "they're" : `${handle} is`} right: <span className="font-medium text-foreground tabular-nums">+{Math.round(match.edge * 100)}¢</span> expected per $1 share
-        </div>
-      </div>
     </div>
   );
 }

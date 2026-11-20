@@ -40,7 +40,7 @@ const TOOLS = [
   {
     name: "save_account_reading",
     description:
-      `Send X Alpha your reading of an X account. First read the account's posts from the last 7 days on X yourself, then call this once with every post, each labelled with the token it is about (${COINS}, or null) and whether the author sounds bullish, bearish or neutral. X Alpha stores it, shows it on the dashboard, and returns the account's lean per token with the matching live Gemini prediction contract.`,
+      `Send X Alpha your reading of an X account. First read the account's posts from the last 7 days on X yourself, then call this once with every post, each labelled with the token it is about (${COINS}, or null) and whether the author sounds bullish, bearish or neutral. X Alpha stores it, shows it on the dashboard under Alpha Profiles, and returns the account's lean per token with the matching live Gemini prediction contract.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -56,7 +56,7 @@ const TOOLS = [
   {
     name: "save_market_brief",
     description:
-      `Part of the routine, after reading the accounts: send X Alpha a brief on how crypto looks right now. Search X and the news for the last 24 to 48 hours yourself: what the most-followed crypto voices are saying, and the biggest stories (ETF flows, regulation, hacks, listings, macro), and 2 to 4 accounts worth adding. X Alpha shows it on the dashboard. Each run replaces the last brief. Also say when your scheduled task runs this routine next (next_run_at) and its schedule, so the dashboard can show when fresh data is due.`,
+      `Part of the routine, after reading the accounts: send X Alpha a brief on how crypto looks right now. Search X and the news for the last 24 to 48 hours yourself: the overall mood, one line each on BTC, ETH and SOL, and 3 to 6 recommended profiles (accounts making clear calls on those coins, shown on the dashboard as "Top recommended profiles" with an Add button), plus 2 to 4 more accounts worth adding. Each run replaces the last brief. Also say when your scheduled task runs this routine next (next_run_at) and its schedule, so the dashboard can show when fresh data is due.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -64,11 +64,11 @@ const TOOLS = [
         headline: { type: "string", description: "A headline of 12 words or fewer on the state of the market." },
         summary: { type: "string", description: "Two short sentences, under 300 characters: what moved and what people are watching." },
         coins: {
-          type: "array", maxItems: 6, description: `One entry per coin X Alpha tracks (${COINS}) that has something worth saying.`,
+          type: "array", maxItems: 6, description: `One entry each for BTC, ETH and SOL (the coins the dashboard shows). Others (${COINS}) are accepted but not shown.`,
           items: { type: "object", properties: { symbol: symbolProp, mood: MOOD, note: { type: "string", description: "One short sentence on that coin, under 100 characters." } }, required: ["symbol", "mood", "note"], additionalProperties: false },
         },
         voices: {
-          type: "array", maxItems: 8, description: "The top voices on X driving the conversation, 3 to 6 of them.",
+          type: "array", maxItems: 8, description: "3 to 6 recommended profiles: X accounts worth following on X Alpha because they made clear, specific calls on BTC, ETH or SOL in the last 48 hours (a clear side, ideally named price levels; no news bots). Shown as \"Top recommended profiles\" with an Add button.",
           items: {
             type: "object",
             properties: {
@@ -76,7 +76,7 @@ const TOOLS = [
               name: { type: "string", description: "Display name." },
               profile_image_url: { type: "string", description: "Profile picture URL from X (https://pbs.twimg.com/...)." },
               followers: { type: "string", description: "Follower count, short, like 1.2M." },
-              take: { type: "string", description: "Their view in one sentence, under 140 characters, close to their words." },
+              take: { type: "string", description: "Their call in one sentence, under 140 characters, close to their words." },
               mood: MOOD,
               url: { type: "string", description: "Link to the post that best shows the take." },
             },
@@ -84,7 +84,7 @@ const TOOLS = [
           },
         },
         news: {
-          type: "array", maxItems: 8, description: "The biggest stories, 3 to 6, most important first.",
+          type: "array", maxItems: 8, description: "Optional and not shown on the dashboard any more; leave it out.",
           items: {
             type: "object",
             properties: {
@@ -116,7 +116,7 @@ const TOOLS = [
         next_run_at: { type: "string", description: "When your scheduled task will run this routine next, ISO 8601 with time zone. Leave it out if this run wasn't scheduled." },
         schedule: { type: "string", description: "The task's schedule in a few words, like \"Every day at 9:00 AM ET\"." },
       },
-      required: ["mood", "headline", "summary", "voices", "news"], additionalProperties: false,
+      required: ["mood", "headline", "summary", "voices"], additionalProperties: false,
     },
   },
   {
@@ -284,7 +284,7 @@ async function callTool(name: string, args: Record<string, unknown>, ctx: { canW
     if (!ctx.canWrite) throw new Error("This server needs its key to save. Reconnect using the MCP address that ends in ?key=...");
     const b = await saveBrief(cleanBrief(args));
     return {
-      saved: true, saved_at: b.savedAt, coins: b.coins.length, voices: b.voices.length, news: b.news.length, suggested_accounts: b.suggested?.length ?? 0,
+      saved: true, saved_at: b.savedAt, coins: b.coins.length, recommended_profiles: b.voices.length, suggested_accounts: b.suggested?.length ?? 0,
       next_run_at: b.nextRunAt ?? null, schedule: b.schedule ?? null,
       ...(b.nextRunAt ? {} : { note: "No next_run_at saved: the dashboard guesses the next run as 24 hours after this one. Send next_run_at (a future ISO time) next run." }),
       dashboard: ctx.origin,
@@ -357,11 +357,11 @@ async function handle(msg: Rpc, ctx: { canWrite: boolean; origin: string }) {
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: {} },
-        serverInfo: { name: "x-alpha", version: "0.6.0" },
+        serverInfo: { name: "x-alpha", version: "0.7.0" },
         instructions: [
           `X Alpha turns an X account's recent posts into a lean per crypto token (${COINS}) and matches it to live Gemini prediction market odds. Nothing here places trades.`,
           "One account: read its posts on X yourself, then call save_account_reading.",
-          "The routine (usually a scheduled task): re-read every saved account with save_account_reading, then call save_market_brief with how crypto looks overall (top voices on X, the big news, accounts worth adding). In save_market_brief, always send next_run_at (when your scheduled task runs next, ISO 8601) and schedule, so the dashboard shows when fresh data is due.",
+          "The routine (usually a scheduled task): re-read every saved account with save_account_reading (the routine prompt lists them all, including any just added), then call save_market_brief with how crypto looks overall (one line each on BTC, ETH and SOL, 3 to 6 recommended profiles, accounts worth adding). In save_market_brief, always send next_run_at (when your scheduled task runs next, ISO 8601) and schedule, so the dashboard shows when fresh data is due.",
           "Track record: get_track_record says how an account's past calls did against the market (BTC for altcoins, a coin basket for BTC) at 1h, 1d, 3d and 7d. An account that is mostly right only because everything rallied shows as \"rides\"; weigh it below one that \"beats\" the market. X Alpha's contract picks already weight each account by this.",
           `Onchain check: for an account's clearest recent calls on ${Object.keys(ONCHAIN).join(", ")}, call get_onchain_flow with the post's time and side to see whether big wallets traded the same way (swaps of $10k or more from X Alpha's QuickNode Streams). It only has swaps from when the Streams started, so a call with no swaps yet is not a finding.`,
         ].join("\n\n"),

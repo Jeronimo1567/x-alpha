@@ -176,12 +176,8 @@ export function SourceTweet({ account, pick, symbol, now = Date.now(), badge, fi
           </svg>
         </div>
         <p className={`text-sm leading-snug whitespace-pre-line ${i < 0 ? "line-clamp-5" : ""}`}>{text}</p>
-        {(url || badge) && (
-          <div className="flex items-center justify-between gap-2">
-            {badge ?? <span />}
-            {url && <span className="text-xs text-muted-foreground">Open on X ↗</span>}
-          </div>
-        )}
+        {/* The whole card links to the post on X, so no separate "open" label. */}
+        {badge && <div className="flex items-center gap-2">{badge}</div>}
       </Tag>
     </div>
   );

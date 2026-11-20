@@ -2,8 +2,10 @@
 // Market brief on the dashboard: Grok Bot's read of how crypto looks right now, saved as part of its routine.
 // The mood and headline first, then each coin with its week of prices, then the top voices on X and the big news.
 
-import { useEffect, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, Minus, Newspaper } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import { motionTokens } from "@/components/arc/motion-tokens";
+import { ArrowDownRight, ArrowUpRight, Check, Minus, Newspaper } from "lucide-react";
 import { Avatar } from "@/components/account-avatar";
 import { GrokBotLogo } from "@/components/brand-logos";
 import { Button } from "@/components/arc/button/button";
@@ -12,11 +14,14 @@ import { EmptyState } from "@/components/arc/empty-state/empty-state";
 import { HoverCard, HoverCardProfile } from "@/components/arc/hover-card/hover-card";
 import { Sparkline } from "@/components/arc/sparkline/sparkline";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
-import { card, label, neutralAccent, signed } from "@/components/shared";
+import { card, label, neutralAccent, signed, usd } from "@/components/shared";
 import { promptFor, routinePrompt } from "@/components/grok-prompts";
 import type { BriefVoice, MarketBrief, Mood, SuggestedAccount } from "@/lib/brief";
-import { TOKENS, type TokenSymbol } from "@/lib/stance";
+import type { TokenSymbol } from "@/lib/stance";
 import type { PriceSeries } from "@/lib/track";
+
+/** The brief's coin row shows only the three main coins. */
+const MAIN_COINS: TokenSymbol[] = ["BTC", "ETH", "SOL"];
 
 const HOUR = 3_600_000;
 const since = (iso: string, now: number) => {
@@ -24,7 +29,6 @@ const since = (iso: string, now: number) => {
   return h < 1 ? "just now" : h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 };
 const moodTone = (m: Mood) => (m === "bullish" ? "bg-good-soft text-good" : m === "bearish" ? "bg-bad-soft text-bad" : "bg-foreground/[0.06] text-muted-foreground");
-const moodDot = (m: Mood) => (m === "bullish" ? "bg-good" : m === "bearish" ? "bg-bad" : "bg-muted-foreground");
 
 function MoodChip({ mood, className = "" }: { mood: Mood; className?: string }) {
   const Icon = mood === "bullish" ? ArrowUpRight : mood === "bearish" ? ArrowDownRight : Minus;
@@ -35,9 +39,21 @@ function MoodChip({ mood, className = "" }: { mood: Mood; className?: string }) 
   );
 }
 
-export function MarketBriefSection({ prices, handles, now, onSaved }: {
+/** The mood as an arrow alone, in a round badge the same height as the Add pill beside it. */
+function MoodBadge({ mood }: { mood: Mood }) {
+  const Icon = mood === "bullish" ? ArrowUpRight : mood === "bearish" ? ArrowDownRight : Minus;
+  return (
+    <span className={`grid size-8 shrink-0 place-items-center rounded-full ${moodTone(mood)}`} title={mood[0].toUpperCase() + mood.slice(1)} aria-label={mood}>
+      <Icon className="size-4" strokeWidth={2.5} aria-hidden="true" />
+    </span>
+  );
+}
+
+export function MarketBriefSection({ prices, handles, now, onSaved, onAdd }: {
   prices: Partial<Record<TokenSymbol, PriceSeries>> | null; handles: string[]; now: number;
-  /** Reloads the saved accounts, so one Grok Bot adds after a copied prompt shows up in Recent Profiles. */
+  /** A recommended profile's Add button: the dashboard shows the routine prompt with them in it. */
+  onAdd: (p: ProfileToAdd) => void;
+  /** Reloads the saved accounts, so one Grok Bot adds after a copied prompt shows up in Alpha Profiles. */
   onSaved: () => void;
 }) {
   // After a suggestion's prompt is copied, check for the new reading every 15s for 10 minutes.
@@ -79,6 +95,8 @@ export function MarketBriefSection({ prices, handles, now, onSaved }: {
   const byCoin = new Map(b.coins.map((c) => [c.symbol, c]));
   return (
     <section className={`${card} grid gap-5`} aria-label="Market brief" style={neutralAccent}>
+      {/* Everything above "Show full brief" grows and shrinks smoothly when it is toggled. */}
+      <AutoHeight className="grid gap-5">
       {/* Mood, headline and the read, with who wrote it and when. */}
       <div className="grid gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -95,9 +113,9 @@ export function MarketBriefSection({ prices, handles, now, onSaved }: {
         <p className={`max-w-3xl leading-relaxed text-muted-foreground text-pretty ${full ? "" : "line-clamp-2"}`}>{b.summary}</p>
       </div>
 
-      {/* Each coin: its week of prices and Grok's one line on it. */}
-      <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-        {TOKENS.map((t) => {
+      {/* The three main coins: their week of prices and Grok's one line on each. */}
+      <ul className="grid grid-cols-3 gap-2">
+        {MAIN_COINS.map((t) => {
           const series = prices?.[t]?.filter((_, i, all) => (all.length - 1 - i) % 6 === 0).slice(-28);
           const values = series?.map(([, c]) => c) ?? [];
           const change = values.length > 1 ? (values[values.length - 1] / values[0] - 1) : null;
@@ -109,7 +127,8 @@ export function MarketBriefSection({ prices, handles, now, onSaved }: {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={`/tokens/${t.toLowerCase()}.svg`} alt="" className="size-4" />{t}
                 </span>
-                {c && <span className={`size-1.5 rounded-full ${moodDot(c.mood)}`} title={c.mood} />}
+                {/* Latest hourly close from Gemini. */}
+                {prices?.[t]?.length ? <span className="font-mono text-sm font-medium tabular-nums">{(() => { const p = prices[t]!.at(-1)![1]; return usd(p >= 1000 ? Math.round(p) : p); })()}</span> : null}
               </div>
               {values.length > 1
                 ? <Sparkline data={values} label="7D" width={150} height={36} interactive={false}
@@ -121,54 +140,19 @@ export function MarketBriefSection({ prices, handles, now, onSaved }: {
         })}
       </ul>
 
-      <div className="grid gap-5 md:grid-cols-2">
-        {/* Top voices: hover a face for their profile card. */}
-        <div className="grid content-start gap-2">
-          <h3 className="text-sm font-semibold">Top voices</h3>
-          <ul className="grid gap-2">
-            {(full ? b.voices : b.voices.slice(0, 3)).map((v) => <VoiceRow key={v.handle} v={v} full={full} />)}
-          </ul>
-        </div>
-
-        {/* Big news, most important first. */}
-        <div className="grid content-start gap-2">
-          <h3 className="text-sm font-semibold">Big news</h3>
-          <ol className="grid gap-2">
-            {(full ? b.news : b.news.slice(0, 3)).map((n, i) => {
-              const Tag = n.url ? "a" : "div";
-              return (
-                <li key={n.title}>
-                  <Tag {...(n.url ? { href: n.url, target: "_blank", rel: "noreferrer" } : {})}
-                    className="grid grid-cols-[auto_1fr] gap-3 rounded-lg p-2.5 ring-1 ring-foreground/[0.06] outline-none transition-colors hover:bg-foreground/[0.03] hover:ring-foreground/15 focus-visible:ring-2 focus-visible:ring-ring">
-                    <span className="font-mono text-xs leading-5 text-muted-foreground tabular-nums">{String(i + 1).padStart(2, "0")}</span>
-                    <span className="grid gap-1">
-                      <span className="flex items-start justify-between gap-2">
-                        <span className="text-sm leading-5 font-medium text-pretty">{n.title}</span>
-                        <MoodChip mood={n.impact} className="shrink-0" />
-                      </span>
-                      {full && <span className="text-xs leading-relaxed text-muted-foreground text-pretty">{n.summary}</span>}
-                      <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                        {n.source && <span className="font-medium text-foreground/80">{n.source}</span>}
-                        {n.at && now > 0 && <span>· {since(n.at, now)}</span>}
-                        {n.tokens.map((t) => (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img key={t} src={`/tokens/${t.toLowerCase()}.svg`} alt={t} title={t} className="size-3.5" />
-                        ))}
-                        {n.url && <span className="ml-auto">Read ↗</span>}
-                      </span>
-                    </span>
-                  </Tag>
-                </li>
-              );
-            })}
-          </ol>
-        </div>
+      {/* Top recommended profiles: hover a face for their profile card. */}
+      <div className="grid content-start gap-2">
+        <h3 className="text-sm font-semibold">Top recommended profiles</h3>
+        <ul className="grid gap-2">
+          {(full ? b.voices : b.voices.slice(0, 3)).map((v, i) => <VoiceRow key={v.handle} v={v} full={full} entering={i >= 3} saved={handles.some((h) => h.toLowerCase() === v.handle.toLowerCase())} onAdd={onAdd} />)}
+        </ul>
       </div>
+      </AutoHeight>
 
-      {(b.summary.length > 160 || b.voices.length > 3 || b.news.length > 3 || b.coins.length > 0) && (
+      {(b.summary.length > 160 || b.voices.length > 3 || b.coins.length > 0) && (
         <div className="-mt-2 flex justify-center">
           <Button variant="ghost" size="sm" onClick={() => setFull((f) => !f)} aria-expanded={full}>
-            {full ? "Show less" : `Show full brief${b.news.length > 3 || b.voices.length > 3 ? ` (${Math.max(0, b.voices.length - 3) + Math.max(0, b.news.length - 3)} more)` : ""}`}
+            {full ? "Show less" : `Show full brief${b.voices.length > 3 ? ` (${b.voices.length - 3} more)` : ""}`}
           </Button>
         </div>
       )}
@@ -221,28 +205,79 @@ function SuggestionCard({ a, onCopied }: { a: SuggestedAccount; onCopied: () => 
   );
 }
 
-function VoiceRow({ v, full }: { v: BriefVoice; full: boolean }) {
+/** Animates its height to fit its content, so expanding or collapsing the brief slides instead of jumping. */
+function AutoHeight({ children, className }: { children: React.ReactNode; className?: string }) {
+  const inner = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number | "auto">("auto");
+  const reduce = useReducedMotion();
+  useEffect(() => {
+    const node = inner.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setHeight(node.offsetHeight));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    // A few px of padding (cancelled by the negative margin) so row outlines and focus rings aren't clipped.
+    <motion.div initial={false} animate={{ height }} transition={reduce ? { duration: 0 } : motionTokens.spring.smooth} style={{ overflow: "hidden" }} className="-m-1">
+      <div ref={inner} className={`p-1 ${className ?? ""}`}>{children}</div>
+    </motion.div>
+  );
+}
+
+/** What a recommended profile carries when dragged onto Alpha Profiles (see the drop zone in dashboard.tsx). */
+export const PROFILE_DRAG_TYPE = "application/x-alpha-profile";
+export type ProfileToAdd = { handle: string; name: string; avatar?: string };
+
+function VoiceRow({ v, full, saved, onAdd, entering = false }: { v: BriefVoice; full: boolean; saved: boolean; onAdd: (p: ProfileToAdd) => void; entering?: boolean }) {
   const account = { handle: v.handle, name: v.name, avatar: v.avatar, bio: "", followers: v.followers ?? "", posts: [], source: "grok" as const };
   const Tag = v.url ? "a" : "div";
+  const profile: ProfileToAdd = { handle: v.handle, name: v.name, avatar: v.avatar };
+  // What follows the cursor while dragging: a small pill (avatar + name), not the whole row.
+  const ghost = useRef<HTMLSpanElement>(null);
   return (
-    <li className="grid grid-cols-[auto_1fr] items-start gap-3 rounded-lg p-2.5 ring-1 ring-foreground/[0.06]">
+    // Drag the row onto Alpha Profiles to add it; Add does the same for anyone who doesn't drag.
+    // The links and picture inside can't be dragged on their own, so grabbing anywhere drags the whole profile.
+    <li draggable={!saved}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(PROFILE_DRAG_TYPE, JSON.stringify(profile));
+        e.dataTransfer.effectAllowed = "copy";
+        if (ghost.current) e.dataTransfer.setDragImage(ghost.current, 18, 18);
+      }}
+      className={`grid grid-cols-[auto_1fr_auto] items-start gap-3 rounded-lg p-2.5 ring-1 ring-foreground/[0.06] [&_a]:[-webkit-user-drag:none] [&_img]:[-webkit-user-drag:none] ${saved ? "" : "cursor-grab active:cursor-grabbing"} ${entering ? "animate-in fade-in slide-in-from-top-1 duration-300 motion-reduce:animate-none" : ""}`}>
+      {/* Off screen; only used as the drag image. */}
+      <span ref={ghost} aria-hidden="true" className="pointer-events-none fixed -top-96 left-0 flex items-center gap-2 rounded-full bg-card py-1 pr-3 pl-1 text-sm font-medium text-foreground shadow-lg ring-1 ring-foreground/20">
+        <Avatar account={account} className="size-7 text-[10px]" />{v.name}
+      </span>
       <HoverCard side="top" content={
         <HoverCardProfile name={v.name} role={v.handle} avatar={v.avatar ?? `https://unavatar.io/x/${v.handle.slice(1)}`} bio={v.take}
           stats={[...(v.followers ? [{ label: "Followers", value: v.followers }] : []), { label: "Mood", value: v.mood }]} />
       }>
-        <a href={`https://x.com/${v.handle.slice(1)}`} target="_blank" rel="noreferrer" aria-label={`${v.name} on X`} className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <a href={`https://x.com/${v.handle.slice(1)}`} target="_blank" rel="noreferrer" draggable={false} aria-label={`${v.name} on X`} className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <Avatar account={account} className="size-9 text-xs" />
         </a>
       </HoverCard>
-      <Tag {...(v.url ? { href: v.url, target: "_blank", rel: "noreferrer" } : {})} className="grid min-w-0 gap-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <span className="flex items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-sm">
-            <span className="font-semibold">{v.name}</span> <span className="text-muted-foreground">{v.handle}{v.followers ? ` · ${v.followers}` : ""}</span>
-          </span>
-          <MoodChip mood={v.mood} className="shrink-0" />
+      <Tag {...(v.url ? { href: v.url, target: "_blank", rel: "noreferrer" } : {})} draggable={false} className="grid min-w-0 gap-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <span className="min-w-0 truncate text-sm">
+          <span className="font-semibold">{v.name}</span> <span className="text-muted-foreground">{v.handle}{v.followers ? ` · ${v.followers}` : ""}</span>
         </span>
         <span className={`text-sm leading-snug text-pretty ${full ? "" : "line-clamp-2"}`}>&ldquo;{v.take}&rdquo;</span>
       </Tag>
+      {/* Their mood as an arrow, then Add to Alpha Profiles (opens the routine prompt, same as dropping the row). */}
+      <span className="flex items-center gap-1.5 self-center">
+      <MoodBadge mood={v.mood} />
+      {saved ? (
+        <span className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs text-muted-foreground ring-1 ring-foreground/10" title="Already in Alpha Profiles">
+          <Check className="size-3.5" aria-hidden="true" />Added
+        </span>
+      ) : (
+        <button type="button" onClick={() => onAdd(profile)} title="Add to Alpha Profiles (or drag the row there)"
+          aria-label={`Add ${v.handle} to Alpha Profiles`}
+          className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium outline-none ring-1 ring-foreground/15 transition-colors hover:bg-foreground/[0.06] focus-visible:ring-2 focus-visible:ring-ring">
+          <GrokBotLogo className="size-3.5" />Add
+        </button>
+      )}
+      </span>
     </li>
   );
 }

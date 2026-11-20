@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Activity, ArrowDownRight, ArrowUpRight, Radio } from "lucide-react";
 import { Avatar } from "@/components/account-avatar";
 import { QuickNodeLogo } from "@/components/brand-logos";
+import { EvidenceHeader } from "@/components/evidence-header";
 import { Button } from "@/components/arc/button/button";
 import { ChipGroup } from "@/components/arc/chip-group/chip-group";
 import { EmptyState } from "@/components/arc/empty-state/empty-state";
@@ -47,27 +48,17 @@ export function AccountOnchain({ account, symbol }: { account: Account; symbol: 
   const h = account.handle.replace(/^@/, "");
 
   return (
-    <section className={`${card} grid gap-4`} aria-label="Onchain">
-      <div className="flex items-start justify-between gap-3">
-        <div className="grid min-w-0 gap-0.5">
-          <h2 className="font-semibold">Onchain</h2>
-          <p className="text-xs text-muted-foreground">
-            {source ? `Each ${symbol} call from @${h} against the price and large-wallet swaps around it: ${source}.` : `Large-wallet swaps around each call, from QuickNode Streams.`}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1" style={neutralAccent}>
-          {process.env.NODE_ENV !== "production" && source && call && (
-            <Button size="sm" variant="ghost" onClick={() => setSimulating((s) => !s)} aria-pressed={simulating}
+    <section className={`${card} @container grid content-start gap-4`} aria-label="Onchain">
+      <EvidenceHeader title="Onchain flow" source="quicknode" question="Did big wallets trade the same way?"
+        detail={source ? <>Swaps of $10k or more around each {symbol} call from @{h}, live from QuickNode Streams: {source}.</> : <>Swaps of $10k or more around each call, live from QuickNode Streams.</>}
+        actions={process.env.NODE_ENV !== "production" && source && call ? (
+          <span style={neutralAccent}>
+            <Button size="sm" variant="ghost" onClick={() => setSimulating((v) => !v)} aria-pressed={simulating}
               title={simulating ? "Stop simulating swaps" : "Simulate swaps (dev only)"} aria-label={simulating ? "Stop simulating swaps" : "Simulate swaps"}>
               <Activity className={`size-3.5 ${simulating ? "text-warn" : ""}`} aria-hidden="true" />
             </Button>
-          )}
-          <a href="https://www.quicknode.com/streams" target="_blank" rel="noreferrer" title="Onchain data from QuickNode Streams" aria-label="QuickNode Streams"
-            className="flex items-center rounded-full px-3 py-1.5 ring-1 ring-foreground/10 transition-colors hover:bg-foreground/[0.04]">
-            <QuickNodeLogo className="h-3.5 w-auto text-foreground" />
-          </a>
-        </div>
-      </div>
+          </span>
+        ) : null} />
 
       {!source ? (
         <div style={{ "--text-sm": "0.75rem" } as CSSProperties}>
@@ -189,7 +180,7 @@ function CallImpact({ account, symbol, call, simulating }: { account: Account; s
           </Marked>
         </div>
 
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+        <dl className="grid grid-cols-2 gap-2 @2xl:grid-cols-4">
           <Stat name="Since the post" value={change(impact.change)} tone={right} note={`${price(impact.priceAtPost)} → ${price(impact.priceNow)}`} />
           <Stat name="Net large flow after" value={(impact.after.netUsd >= 0 ? "+" : "") + money(impact.after.netUsd)} tone={impact.after.trades ? ((impact.after.netUsd >= 0) === (call.stance === "bullish") ? "good" : "bad") : undefined}
             note={`${impact.after.trades} swaps · ${impact.after.wallets} wallets`} />
@@ -292,10 +283,11 @@ function XMark({ className }: { className: string }) {
 
 function Stat({ name, value, note, tone }: { name: string; value: string; note: string; tone?: "good" | "bad" }) {
   return (
-    <div className="grid content-start gap-0.5">
-      <dt className={label}>{name}</dt>
-      <dd className={`text-xl font-semibold tabular-nums ${tone === "good" ? "text-good" : tone === "bad" ? "text-bad" : ""}`}>{value}</dd>
-      <dd className="text-xs text-muted-foreground">{note}</dd>
+    // Same box as the track record's horizon cells, so the three evidence views read alike.
+    <div className="grid content-start gap-0.5 rounded-lg bg-foreground/[0.03] px-3 py-2">
+      <dt className="text-[11px] text-muted-foreground">{name}</dt>
+      <dd className={`text-base font-semibold tabular-nums ${tone === "good" ? "text-good" : tone === "bad" ? "text-bad" : ""}`}>{value}</dd>
+      <dd className="text-[11px] text-muted-foreground">{note}</dd>
     </div>
   );
 }

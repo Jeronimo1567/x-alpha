@@ -1,24 +1,21 @@
 "use client";
 // Home view: look up an X account and copy a research prompt for Grok Bot, and every saved profile as a card
-// with a mini chart of how following its calls would have gone. Tick two or more to compare them.
+// with a mini chart of how following its calls would have gone. The header's Compare tab ranks them side by side.
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDownRight, ArrowUpRight, SearchX, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/account-avatar";
 import { GrokBotLogo } from "@/components/brand-logos";
-import { Button } from "@/components/arc/button/button";
-import { Checkbox } from "@/components/arc/checkbox/checkbox";
 import { CopyButton } from "@/components/arc/copy-button/copy-button";
 import { motionTokens } from "@/components/arc/motion-tokens";
 import { EmptyState } from "@/components/arc/empty-state/empty-state";
 import { HoldToConfirm } from "@/components/arc/hold-to-confirm/hold-to-confirm";
 import { SearchField } from "@/components/arc/search-field/search-field";
 import { Sparkline } from "@/components/arc/sparkline/sparkline";
-import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { AsciiBackdrop } from "@/components/ascii-backdrop";
-import { MarketBriefSection } from "@/components/market-brief";
-import { promptFor } from "@/components/grok-prompts";
+import { MarketBriefSection, PROFILE_DRAG_TYPE, type ProfileToAdd } from "@/components/market-brief";
+import { promptFor, routinePrompt } from "@/components/grok-prompts";
 import { card, date, displayName, label, neutralAccent, sideOf, signed } from "@/components/shared";
 import type { Account } from "@/lib/sample";
 import { stances, type TokenSymbol } from "@/lib/stance";
@@ -57,41 +54,60 @@ export function summarize(account: Account, prices: Prices, now = 0): ProfileSum
 const handleOf = (raw: string) => raw.trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, "").split(/[/?#\s]/)[0].toLowerCase();
 const validHandle = (h: string) => /^[a-z0-9_]{1,15}$/.test(h);
 
-export function Dashboard({ accounts, prices, now, onOpen, onCompare, onSaved, onRemove }: {
+export function Dashboard({ accounts, prices, now, onOpen, onSaved, onRemove }: {
   accounts: Account[]; prices: Prices; now: number;
   onOpen: (handle: string) => void;
-  onCompare: (handles: string[]) => void;
   /** A reading arrived (from Grok now, or picked up later from the queue): reload the account list. */
   onSaved: () => void;
   /** Removes a profile from the list (deletes a saved reading, hides a sample). */
   onRemove: (handle: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
+  // A recommended profile dropped on (or added to) Alpha Profiles: shows the routine prompt with them in it.
+  const [adding, setAdding] = useState<ProfileToAdd | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const grokHandles = accounts.filter((a) => a.source === "grok").map((a) => a.handle);
+  // After the prompt is copied, reload every 15s for 10 minutes so the new profile shows up when Grok saves it.
+  const [waitUntil, setWaitUntil] = useState(0);
+  useEffect(() => {
+    if (!waitUntil) return;
+    const id = setInterval(() => { if (Date.now() > waitUntil) { clearInterval(id); setWaitUntil(0); } else onSaved(); }, 15_000);
+    return () => clearInterval(id);
+  }, [waitUntil, onSaved]);
+  const isProfileDrag = (e: React.DragEvent) => e.dataTransfer.types.includes(PROFILE_DRAG_TYPE);
   // Recomputed when the clock ticks over to a new hour, not on every 30s tick.
   const hour = Math.floor(now / 3_600_000) * 3_600_000;
   const summaries = useMemo(() => accounts.map((a) => summarize(a, prices, hour)), [accounts, prices, hour]);
 
   const q = query.trim().replace(/^@/, "").toLowerCase();
   const shown = q ? summaries.filter((s) => s.account.handle.toLowerCase().includes(q) || s.account.name.toLowerCase().includes(q)) : summaries;
-  const toggle = (h: string, on: boolean) => setSelected((cur) => (on ? [...cur.filter((x) => x !== h), h] : cur.filter((x) => x !== h)));
 
   return (
     <div className="grid gap-4">
       <Research query={query} setQuery={setQuery} accounts={accounts} onSaved={onSaved} />
 
-      <MarketBriefSection prices={prices} now={now} onSaved={onSaved} handles={accounts.filter((a) => a.source === "grok").map((a) => a.handle)} />
+      <MarketBriefSection prices={prices} now={now} onSaved={onSaved} handles={grokHandles} onAdd={setAdding} />
 
-      <section className="grid gap-3" aria-label="Saved profiles">
+      {/* Drop zone for recommended profiles dragged from the market brief. */}
+      <section aria-label="Saved profiles"
+        onDragOver={(e) => { if (isProfileDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; if (!dragOver) setDragOver(true); } }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false); }}
+        onDrop={(e) => {
+          setDragOver(false);
+          const raw = e.dataTransfer.getData(PROFILE_DRAG_TYPE);
+          if (!raw) return;
+          e.preventDefault();
+          try { setAdding(JSON.parse(raw)); } catch { /* not a profile */ }
+        }}
+        className={`relative grid gap-3 rounded-xl transition-[box-shadow,background-color] ${dragOver ? "bg-foreground/[0.03] ring-2 ring-foreground/40 ring-offset-8 ring-offset-background" : ""}`}>
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-xl bg-background/70 backdrop-blur-sm">
+            <span className="flex items-center gap-2 rounded-full bg-card px-4 py-2 text-sm font-medium ring-1 ring-foreground/15"><GrokBotLogo className="size-4" />Drop to add to Alpha Profiles</span>
+          </div>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-baseline gap-2">
-            <h2 className="font-semibold">Recent Profiles</h2>
-          </div>
-          <div className="flex items-center gap-2" style={neutralAccent}>
-            {selected.length > 0 && <Button variant="ghost" size="sm" onClick={() => setSelected([])}>Clear</Button>}
-            <Button size="sm" disabled={selected.length < 2} onClick={() => onCompare(selected)}>
-              {selected.length < 2 ? "Compare" : `Compare ${selected.length}`}
-            </Button>
+            <h2 className="font-semibold">Alpha Profiles</h2>
           </div>
         </div>
 
@@ -106,13 +122,60 @@ export function Dashboard({ accounts, prices, now, onOpen, onCompare, onSaved, o
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {shown.map((s) => (
               <li key={s.account.handle}>
-                <ProfileCard s={s} selected={selected.includes(s.account.handle)} onToggle={(on) => toggle(s.account.handle, on)} onOpen={() => onOpen(s.account.handle)}
-                  onRemove={() => { setSelected((cur) => cur.filter((x) => x !== s.account.handle)); onRemove(s.account.handle); }} />
+                <ProfileCard s={s} onOpen={() => onOpen(s.account.handle)} onRemove={() => onRemove(s.account.handle)} />
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      {adding && (
+        <AddProfileDialog profile={adding} handles={grokHandles} onClose={() => setAdding(null)}
+          onCopied={() => setWaitUntil(Date.now() + 10 * 60_000)} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Shown when a recommended profile is dropped on Alpha Profiles (or its Add is pressed): Grok Bot is what reads an
+ * account, so the next step is to update the Grok Bot routine with this prompt, which now includes the new profile.
+ */
+function AddProfileDialog({ profile, handles, onClose, onCopied }: { profile: ProfileToAdd; handles: string[]; onClose: () => void; onCopied: () => void }) {
+  const handle = profile.handle.startsWith("@") ? profile.handle : "@" + profile.handle;
+  const all = [...new Set([...handles, handle])];
+  const account = { handle, name: profile.name, avatar: profile.avatar, bio: "", followers: "", posts: [], source: "grok" as const };
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-background/70 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label={`Add ${handle} to Alpha Profiles`} onClick={(e) => e.stopPropagation()}
+        className={`${card} grid w-full max-w-md gap-4 p-6 shadow-2xl`} style={neutralAccent}>
+        <div className="flex items-center gap-3">
+          <Avatar account={account} className="size-12 text-sm" />
+          <div className="min-w-0">
+            <p className="truncate font-semibold">Add {profile.name} to Alpha Profiles</p>
+            <p className="truncate text-xs text-muted-foreground">{handle}</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="ml-auto grid size-8 place-items-center rounded-md text-muted-foreground outline-none hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="grid gap-2 rounded-lg bg-foreground/[0.04] p-4">
+          <p className="flex items-center gap-2 text-sm font-semibold"><GrokBotLogo className="size-4" />Update your Grok Bot routine</p>
+          <p className="text-sm leading-relaxed text-muted-foreground text-pretty">
+            Copy this prompt, paste it into your Grok Bot routine and send it. Grok Bot will read {handle} along with your {handles.length} other {handles.length === 1 ? "profile" : "profiles"} and add them here.
+          </p>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-muted-foreground" aria-live="polite">{copied ? "Copied. Waiting for Grok Bot…" : `${all.length} profiles in the routine`}</span>
+          <CopyButton value={routinePrompt(all)} label="Copy routine prompt" onCopied={() => { setCopied(true); onCopied(); }} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -158,16 +221,17 @@ export function LeanSparkline({ s, width = 160, height = 30, interactive = true 
   );
 }
 
-function ProfileCard({ s, selected, onToggle, onOpen, onRemove }: { s: ProfileSummary; selected: boolean; onToggle: (on: boolean) => void; onOpen: () => void; onRemove: () => void }) {
+function ProfileCard({ s, onOpen, onRemove }: { s: ProfileSummary; onOpen: () => void; onRemove: () => void }) {
   const a = s.account;
   const sample = a.source !== "grok";
   const [confirming, setConfirming] = useState(false);
   return (
     // minmax(0, 1fr): the chart's one-line headline can't widen the column past the card.
-    // The whole card opens the profile; the name button is the keyboard route, and the checkbox only selects.
-    <article onClick={onOpen} className={`${card} relative grid h-full min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)] gap-3 overflow-hidden p-4 transition-shadow ${selected ? "ring-2 ring-foreground/60" : "hover:ring-foreground/25"}`}
+    // The whole card opens the profile; the name button is the keyboard route.
+    <article onClick={onOpen} className={`${card} relative grid h-full min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)] gap-3 overflow-hidden p-4 transition-shadow hover:ring-foreground/25`}
       style={{ ...neutralAccent, "--accent": "var(--foreground)" } as CSSProperties}>
-      <div className="flex items-start justify-between gap-2">
+      {/* Centred on the avatar, and the bin pulled to the card's edge so its icon lines up with the content below. */}
+      <div className="flex items-center justify-between gap-2">
         <button type="button" onClick={(e) => { e.stopPropagation(); onOpen(); }} className="flex min-w-0 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <Avatar account={a} className="size-10 text-sm" />
           <span className="min-w-0">
@@ -175,12 +239,11 @@ function ProfileCard({ s, selected, onToggle, onOpen, onRemove }: { s: ProfileSu
             <span className="block truncate text-xs text-muted-foreground">{a.handle}{sample && " · Sample"}</span>
           </span>
         </button>
-        <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-          <button type="button" aria-label={`Remove ${a.handle}`} title="Remove from Recent Profiles" onClick={() => setConfirming(true)}
+        <span className="-mr-2 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <button type="button" aria-label={`Remove ${a.handle}`} title="Remove from Alpha Profiles" onClick={() => setConfirming(true)}
             className="grid size-8 place-items-center rounded-md text-muted-foreground outline-none hover:bg-bad-soft hover:text-bad focus-visible:ring-2 focus-visible:ring-ring">
             <Trash2 className="size-4" strokeWidth={1.75} />
           </button>
-          <Checkbox aria-label={`Select ${a.handle} to compare`} checked={selected} onCheckedChange={(v) => onToggle(v === true)} />
         </span>
       </div>
 
@@ -300,11 +363,10 @@ function Research({ query, setQuery, accounts, onSaved }: { query: string; setQu
           </AnimatePresence>
         </motion.div>
 
-        {(waiting || arrived || (!ready && query.trim() && !ok)) && (
+        {/* While waiting there is no message: the page keeps checking quietly and says so once the reading lands. */}
+        {(arrived || (!ready && query.trim() && !ok)) && (
           <span className="text-xs text-muted-foreground" aria-live="polite">
-            {arrived ? <span className="text-good">Saved. @{ready} is in your profiles below.</span>
-              : waiting ? <TextShimmer>{`Waiting for Grok Bot to save @${ready}…`}</TextShimmer>
-              : "That doesn't look like an X username."}
+            {arrived ? <span className="text-good">Saved. @{ready} is in your profiles below.</span> : "That doesn't look like an X username."}
           </span>
         )}
       </div>
