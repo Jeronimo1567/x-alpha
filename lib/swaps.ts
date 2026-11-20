@@ -4,7 +4,7 @@
 // Locally (no Redis) they go to .data/swaps/<TOKEN>.jsonl, one swap per line.
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { hashObject, kv, KEYS, parse } from "./kv";
+import { kv, KEYS, parse } from "./kv";
 import { TOKENS, type TokenSymbol } from "./stance";
 import { ONCHAIN, ONCHAIN_SOURCES, type Chain } from "./onchain-sources";
 
@@ -57,22 +57,15 @@ export async function saveSwaps(swaps: Swap[]): Promise<number> {
   const byToken = new Map<TokenSymbol, Swap[]>();
   for (const s of swaps) byToken.set(s.token, [...(byToken.get(s.token) ?? []), s]);
   if (kv) {
-    // One request: per token, add the batch (identical swaps collapse, members are unique) and trim old ones; then
-    // note the newest real swap per token for the status check.
+    // Usually one command per delivery: add the batch to its token's sorted set (identical swaps collapse). Old swaps
+    // are trimmed on about 1 delivery in 50, which keeps the set near KEEP_DAYS without paying a command every time.
+    // QuickNode sends every block that has a large swap (batch size 1 on its plan), so deliveries are frequent and
+    // each command counts against Upstash's free 500K a month.
     const p = kv.pipeline();
-    const last: Record<string, number> = {};
     for (const [token, batch] of byToken) {
       const [first, ...rest] = batch.map((s) => ({ score: s.time, member: JSON.stringify(s) }));
       p.zadd(KEYS.swaps(token), first, ...rest);
-      p.zremrangebyscore(KEYS.swaps(token), 0, Date.now() - KEEP_DAYS * DAY);
-      const real = batch.filter((s) => !s.sim);
-      if (real.length) last[token] = Math.max(...real.map((s) => s.time));
-    }
-    if (Object.keys(last).length) {
-      // Only move "last" forward (a delayed delivery must not move it back).
-      const prev = hashObject(await kv.hgetall(KEYS.swapsLast));
-      const next = Object.fromEntries(Object.entries(last).filter(([t, v]) => v > Number(prev[t] ?? 0)));
-      if (Object.keys(next).length) p.hset(KEYS.swapsLast, next);
+      if (Math.random() < 1 / 50) p.zremrangebyscore(KEYS.swaps(token), 0, Date.now() - KEEP_DAYS * DAY);
     }
     await p.exec();
     return swaps.length;
@@ -117,16 +110,18 @@ export async function streamsStatus(now = Date.now()): Promise<StreamsStatus> {
   const covered = Object.keys(ONCHAIN_SOURCES) as TokenSymbol[];
   let tokens: StreamsStatus["tokens"];
   if (kv) {
-    // One request, a handful of commands: the newest real swap per token, and how many swaps arrived in the last day.
-    // (The count includes simulated swaps, which only exist when the simulator was used on this database.)
+    // One request, two commands per token: how many swaps arrived in the last day, and the newest one.
+    // (Counts include simulated swaps, which only exist if the simulator was used against this database.)
     const p = kv.pipeline();
-    p.hgetall(KEYS.swapsLast);
-    for (const t of covered) p.zcount(KEYS.swaps(t), from, now);
-    const [lastRaw, ...counts] = await p.exec<[unknown, ...number[]]>();
-    const last = hashObject(lastRaw);
+    for (const t of covered) {
+      p.zcount(KEYS.swaps(t), from, now);
+      p.zrange(KEYS.swaps(t), "+inf", "-inf", { byScore: true, rev: true, offset: 0, count: 1, withScores: true });
+    }
+    const out = await p.exec<unknown[]>();
     tokens = covered.map((token, i) => {
-      const t = Number(last[token] ?? 0);
-      return { token, chain: ONCHAIN[token]!.chain, last: t || null, count: Number(counts[i] ?? 0) };
+      const newest = out[i * 2 + 1] as (string | number)[] | null;
+      const last = newest && newest.length >= 2 ? Number(newest[1]) : null;
+      return { token, chain: ONCHAIN[token]!.chain, last, count: Number(out[i * 2] ?? 0) };
     });
   } else {
     tokens = await Promise.all(covered.map(async (token) => {

@@ -19,7 +19,6 @@ export const KEYS = {
   readings: "xalpha:readings",          // hash: handle → reading JSON
   brief: "xalpha:brief",                // string: brief JSON
   swaps: (token: string) => `xalpha:swaps:${token}`, // sorted set: score = time (ms), member = swap JSON
-  swapsLast: "xalpha:swaps:last",       // hash: token → time (ms) of the newest real swap
 };
 
 export const parse = <T>(raw: unknown): T => (typeof raw === "string" ? JSON.parse(raw) : raw) as T;
