@@ -161,7 +161,7 @@ function CallImpact({ account, symbol, call, simulating }: { account: Account; s
         <div className={panel}>
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="grid gap-0.5">
-              <span className={`${label} flex items-center gap-1.5`}>Onchain buys and sells · swaps of $10k+
+              <span className={`${label} flex items-center gap-1.5`}>Wallets taking a side · swaps of $10k+
                 {impact.simulated && <span className="rounded-md bg-warn-soft px-1.5 py-px font-semibold normal-case tracking-normal text-warn">Simulated</span>}
               </span>
               <span className="text-sm">
@@ -170,6 +170,12 @@ function CallImpact({ account, symbol, call, simulating }: { account: Account; s
                 <span className="font-semibold tabular-nums">{money(impact.after.sellUsd)}</span><span className="text-muted-foreground"> sold · net </span>
                 <span className={`font-semibold tabular-nums ${impact.after.netUsd >= 0 ? "text-good" : "text-bad"}`}>{impact.after.netUsd >= 0 ? "+" : ""}{money(impact.after.netUsd)}</span>
               </span>
+              {/* Two-way wallets (market makers, arbitrage and routing bots) are left out of the chart and the verdict. */}
+              {impact.excluded.wallets > 0 && (
+                <span className="text-xs text-muted-foreground" title="Wallets that bought and sold similar amounts, or swapped more than 20 times, in this window: market makers and bots, not wallets taking a view.">
+                  Left out {impact.excluded.wallets} two-way {impact.excluded.wallets === 1 ? "wallet" : "wallets"} (bots, market makers): {money(impact.excluded.usd)} in {impact.excluded.trades} swaps
+                </span>
+              )}
             </div>
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><QuickNodeLogo className="h-3.5 w-auto text-foreground" />Streams</span>
           </div>

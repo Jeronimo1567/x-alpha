@@ -1,4 +1,4 @@
-// QuickNode Streams filter for X Alpha: large ETH and BTC (as WBTC) swaps on Uniswap v3. Paste it into a Stream on
+// QuickNode Streams filter for X Alpha: large ETH and BTC (as WBTC and cbBTC) swaps on Uniswap v3. Paste it into a Stream on
 // Ethereum mainnet, dataset Block with Receipts, with X Alpha's /api/streams as the webhook destination.
 //
 // It reads the Swap events of the pools below. A pool's amounts are from the pool's side: positive means the pool
@@ -16,6 +16,11 @@ const POOLS = {
   "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8": { token: "ETH", base: 1, baseDec: 18, quoteDec: 6 }, // USDC/WETH 0.3%
   "0x11b815efb8f581194ae79006d24e0d814b7697f6": { token: "ETH", base: 0, baseDec: 18, quoteDec: 6 }, // WETH/USDT 0.05%
   "0x99ac8ca7087fa4a2a1fb6357269965a2014abc35": { token: "BTC", base: 0, baseDec: 8, quoteDec: 6 },  // WBTC/USDC 0.3%
+  // More BTC pools, so BTC flow isn't one thin pool (checked on-chain: token0/token1/fee).
+  "0x9a772018fbd77fcd2d25657e5c547baff3fd7d16": { token: "BTC", base: 0, baseDec: 8, quoteDec: 6 },  // WBTC/USDC 0.05%
+  "0x9db9e0e53058c89e5b94e29621a205198648425b": { token: "BTC", base: 0, baseDec: 8, quoteDec: 6 },  // WBTC/USDT 0.3%
+  "0x54e58c986818903d2d86dafe03f5f5e6c2ca6710": { token: "BTC", base: 1, baseDec: 8, quoteDec: 6 },  // USDC/cbBTC 0.05%
+  "0x4548280ac92507c9092a511c7396cbea78fa9e49": { token: "BTC", base: 1, baseDec: 8, quoteDec: 6 },  // USDC/cbBTC 0.3%
 };
 
 async function main(stream) {

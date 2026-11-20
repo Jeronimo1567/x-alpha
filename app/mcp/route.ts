@@ -266,6 +266,7 @@ async function onchainFlow(symbol: TokenSymbol, postAt: number, stance: "bullish
     price_at_post: i.priceAtPost, price_now: i.priceNow, change_since_post: round(i.change, 4), move_in_call_direction: round(i.callMove, 4),
     large_flow_12h_before: { bought_usd: usd(i.before.buyUsd), sold_usd: usd(i.before.sellUsd), net_usd: usd(i.before.netUsd), swaps: i.before.trades },
     large_flow_after: { bought_usd: usd(i.after.buyUsd), sold_usd: usd(i.after.sellUsd), net_usd: usd(i.after.netUsd), swaps: i.after.trades, wallets: i.after.wallets },
+    left_out_two_way_wallets: { wallets: i.excluded.wallets, swaps: i.excluded.trades, usd: usd(i.excluded.usd), why: "Bought and sold similar amounts, or swapped 20+ times, in this window: market makers and bots. Flows above count only wallets taking a side." },
     verdict: i.flags.map((f) => `${f.label}: ${f.detail}`),
   };
 }
