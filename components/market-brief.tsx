@@ -15,8 +15,8 @@ import { HoverCard, HoverCardProfile } from "@/components/arc/hover-card/hover-c
 import { Sparkline } from "@/components/arc/sparkline/sparkline";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { card, label, neutralAccent, signed, usd } from "@/components/shared";
-import { promptFor, routinePrompt } from "@/components/grok-prompts";
-import type { BriefVoice, MarketBrief, Mood, SuggestedAccount } from "@/lib/brief";
+import { routinePrompt } from "@/components/grok-prompts";
+import type { BriefVoice, MarketBrief, Mood } from "@/lib/brief";
 import type { TokenSymbol } from "@/lib/stance";
 import type { PriceSeries } from "@/lib/track";
 
@@ -49,22 +49,13 @@ function MoodBadge({ mood }: { mood: Mood }) {
   );
 }
 
-export function MarketBriefSection({ prices, handles, now, onSaved, onAdd }: {
+export function MarketBriefSection({ prices, handles, now, onAdd }: {
   prices: Partial<Record<TokenSymbol, PriceSeries>> | null; handles: string[]; now: number;
   /** A recommended profile's Add button: the dashboard shows the routine prompt with them in it. */
   onAdd: (p: ProfileToAdd) => void;
-  /** Reloads the saved accounts, so one Grok Bot adds after a copied prompt shows up in Alpha Profiles. */
-  onSaved: () => void;
 }) {
-  // After a suggestion's prompt is copied, check for the new reading every 15s for 10 minutes.
-  const [waitUntil, setWaitUntil] = useState(0);
   // Short by default: headline, two lines of summary, coins, three voices, three headlines. The rest on request.
   const [full, setFull] = useState(false);
-  useEffect(() => {
-    if (!waitUntil) return;
-    const id = setInterval(() => { if (Date.now() > waitUntil) { clearInterval(id); setWaitUntil(0); } else onSaved(); }, 15_000);
-    return () => clearInterval(id);
-  }, [waitUntil, onSaved]);
   const [state, setState] = useState<{ status: "loading" } | { status: "ready"; brief: MarketBrief | null } | { status: "error" }>({ status: "loading" });
   useEffect(() => {
     let live = true;
@@ -157,51 +148,7 @@ export function MarketBriefSection({ prices, handles, now, onSaved, onAdd }: {
         </div>
       )}
 
-      {/* Accounts Grok Bot thinks are worth adding, minus the ones already saved. Copy the prompt to have Grok read one. */}
-      {(() => {
-        const saved = new Set(handles.map((h) => h.toLowerCase()));
-        const fresh = (b.suggested ?? []).filter((a) => !saved.has(a.handle.toLowerCase()));
-        if (!fresh.length) return null;
-        return (
-          <div className="grid gap-2 border-t border-foreground/[0.07] pt-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h3 className="text-sm font-semibold">Accounts to add</h3>
-              <span className="text-xs text-muted-foreground">Copy the prompt and send it to Grok Bot to start tracking them.</span>
-            </div>
-            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {fresh.map((a) => <SuggestionCard key={a.handle} a={a} onCopied={() => setWaitUntil(Date.now() + 10 * 60_000)} />)}
-            </ul>
-          </div>
-        );
-      })()}
     </section>
-  );
-}
-
-function SuggestionCard({ a, onCopied }: { a: SuggestedAccount; onCopied: () => void }) {
-  const account = { handle: a.handle, name: a.name, avatar: a.avatar, bio: "", followers: a.followers ?? "", posts: [], source: "grok" as const };
-  return (
-    <li className="grid content-between gap-3 rounded-lg p-3 ring-1 ring-foreground/[0.08]">
-      <div className="grid gap-2">
-        <a href={`https://x.com/${a.handle.slice(1)}`} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <Avatar account={account} className="size-9 text-xs" />
-          <span className="grid min-w-0 leading-tight">
-            <span className="truncate text-sm font-semibold">{a.name}</span>
-            <span className="truncate text-xs text-muted-foreground">{a.handle}{a.followers ? ` · ${a.followers}` : ""}</span>
-          </span>
-          {a.tokens.length > 0 && (
-            <span className="ml-auto flex shrink-0 -space-x-1">
-              {a.tokens.slice(0, 3).map((t) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img key={t} src={`/tokens/${t.toLowerCase()}.svg`} alt={t} title={t} className="size-4 rounded-full bg-card ring-2 ring-card" />
-              ))}
-            </span>
-          )}
-        </a>
-        <p className="text-xs leading-relaxed text-muted-foreground text-pretty">{a.why}</p>
-      </div>
-      <CopyButton value={promptFor(a.handle.slice(1))} label="Copy prompt" onCopied={onCopied} />
-    </li>
   );
 }
 

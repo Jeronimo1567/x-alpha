@@ -86,7 +86,7 @@ export function Dashboard({ accounts, prices, now, onOpen, onSaved, onRemove }: 
     <div className="grid gap-4">
       <Research query={query} setQuery={setQuery} accounts={accounts} onSaved={onSaved} />
 
-      <MarketBriefSection prices={prices} now={now} onSaved={onSaved} handles={grokHandles} onAdd={setAdding} />
+      <MarketBriefSection prices={prices} now={now} handles={grokHandles} onAdd={setAdding} />
 
       {/* Drop zone for recommended profiles dragged from the market brief. */}
       <section aria-label="Saved profiles"
