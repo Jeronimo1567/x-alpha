@@ -62,19 +62,19 @@ export function useOdds(symbol: TokenSymbol, nonce = 0): OddsState {
 
 export type StreamsState = { status: "loading" } | { status: "error" } | ({ status: "ready" } & StreamsStatus);
 
-/** What the QuickNode Streams have delivered lately, checked every minute; `reload` checks now. */
+/** What the QuickNode Streams have delivered lately, checked every 2 minutes; `reload` checks now. */
 export function useStreams(): [StreamsState, () => Promise<void>] {
   const [state, setState] = useState<StreamsState>({ status: "loading" });
   const reload = useCallback(async () => {
     try {
-      const r = await fetch("/api/streams/status", { cache: "no-store" });
+      const r = await fetch("/api/streams/status");
       const body = await r.json();
       setState(r.ok ? { status: "ready", ...body } : { status: "error" });
     } catch { setState({ status: "error" }); }
   }, []);
   useEffect(() => {
     const first = setTimeout(reload, 0);
-    const t = setInterval(reload, 60_000);
+    const t = setInterval(reload, 120_000); // the endpoint is cached for 2 minutes anyway
     return () => { clearTimeout(first); clearInterval(t); };
   }, [reload]);
   return [state, reload];

@@ -1,6 +1,6 @@
 // Prints each account's track record at every horizon: raw hit rate, alpha hit rate (beat the market), mean alpha
 // and the t-stat hint. Uses real Gemini hourly prices, the sample accounts, and saved Grok readings (Vercel Blob when
-// BLOB_READ_WRITE_TOKEN is set, else .data/readings.json).
+// Upstash Redis is connected (KV_REST_API_URL / KV_REST_API_TOKEN), else .data/readings.json).
 //   node scripts/alpha-report.mjs            (runs this file through jiti, so the app's TypeScript loads as is)
 import { allPrices } from "@/lib/prices";
 import { listReadings, toAccount } from "@/lib/readings";

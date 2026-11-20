@@ -1,9 +1,9 @@
 // The market brief Grok Bot sends in as part of its routine: how crypto looks overall, what the loudest voices on X
-// are saying, and the big news. One document, replaced on every run. Stored like readings: Vercel Blob on Vercel,
-// .data/brief.json locally.
+// are saying, and the big news. One document, replaced on every run. Stored like readings: one Redis key on Vercel
+// (lib/kv), .data/brief.json locally.
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { list, put } from "@vercel/blob";
+import { kv, KEYS, parse } from "./kv";
 import { cleanAvatar, cleanHandle } from "./readings";
 import { TOKENS, type TokenSymbol } from "./stance";
 
@@ -24,8 +24,6 @@ export type MarketBrief = {
 };
 
 const LOCAL_FILE = path.join(process.cwd(), ".data", "brief.json");
-const BLOB_PATH = "brief/latest.json";
-const useBlob = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 
 const text = (v: unknown, max: number, field: string, required = true) => {
   const s = String(v ?? "").trim().slice(0, max);
@@ -83,18 +81,13 @@ export function cleanBrief(raw: Record<string, unknown>): MarketBrief {
 }
 
 export async function getBrief(): Promise<MarketBrief | null> {
-  if (useBlob()) {
-    const { blobs } = await list({ prefix: BLOB_PATH });
-    if (!blobs.length) return null;
-    const r = await fetch(blobs[0].url, { cache: "no-store" });
-    return r.ok ? r.json() : null;
-  }
+  if (kv) { const r = await kv.get<string>(KEYS.brief); return r ? parse<MarketBrief>(r) : null; }
   try { return JSON.parse(await fs.readFile(LOCAL_FILE, "utf8")); } catch { return null; }
 }
 
 export async function saveBrief(brief: MarketBrief): Promise<MarketBrief> {
-  if (useBlob()) {
-    await put(BLOB_PATH, JSON.stringify(brief), { access: "public", addRandomSuffix: false, allowOverwrite: true, contentType: "application/json" });
+  if (kv) {
+    await kv.set(KEYS.brief, JSON.stringify(brief));
   } else {
     await fs.mkdir(path.dirname(LOCAL_FILE), { recursive: true });
     await fs.writeFile(LOCAL_FILE, JSON.stringify(brief, null, 2));

@@ -1,8 +1,8 @@
 // Readings that Grok Bot sends in through the MCP server: one JSON document per X account.
-// On Vercel they live in Vercel Blob. Locally (no blob token) they live in .data/readings.json.
+// On Vercel they live in Upstash Redis, one hash field per account (lib/kv). Locally they live in .data/readings.json.
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { del, list, put } from "@vercel/blob";
+import { hashObject, kv, KEYS, parse } from "./kv";
 import type { Account, Stance } from "./sample";
 import { TOKENS, type TokenSymbol } from "./stance";
 
@@ -13,7 +13,6 @@ const KEEP_DAYS = 30;
 const MAX_POSTS = 100;
 const DAY = 86_400_000;
 const LOCAL_FILE = path.join(process.cwd(), ".data", "readings.json");
-const useBlob = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 
 /** Accepts only X's own image host, and asks for the larger size. */
 export function cleanAvatar(raw: unknown): string | undefined {
@@ -52,9 +51,10 @@ async function readLocal(): Promise<Record<string, Reading>> {
 
 export async function listReadings(): Promise<Reading[]> {
   let all: Reading[];
-  if (useBlob()) {
-    const { blobs } = await list({ prefix: "readings/" });
-    all = (await Promise.all(blobs.map((b) => fetch(b.url, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null))))).filter(Boolean);
+  if (kv) {
+    // One command for every account.
+    const rows = hashObject(await kv.hgetall(KEYS.readings));
+    all = Object.values(rows).map((r) => parse<Reading>(r));
   } else {
     all = Object.values(await readLocal());
   }
@@ -62,6 +62,7 @@ export async function listReadings(): Promise<Reading[]> {
 }
 
 export async function getReading(handle: string): Promise<Reading | null> {
+  if (kv) { const r = await kv.hget<string>(KEYS.readings, handle); return r ? parse<Reading>(r) : null; }
   return (await listReadings()).find((r) => r.handle === handle) ?? null;
 }
 
@@ -74,8 +75,8 @@ export async function saveReading(input: { handle: string; name: string; summary
   const posts = [...byKey.values()].filter((p) => Date.parse(p.postedAt) >= cutoff).sort((a, b) => b.postedAt.localeCompare(a.postedAt));
   const reading: Reading = { handle: input.handle, name: input.name, summary: input.summary, analyzedAt: new Date().toISOString(), posts, avatar: input.avatar ?? before?.avatar };
 
-  if (useBlob()) {
-    await put(`readings/${input.handle}.json`, JSON.stringify(reading), { access: "public", addRandomSuffix: false, allowOverwrite: true, contentType: "application/json" });
+  if (kv) {
+    await kv.hset(KEYS.readings, { [input.handle]: JSON.stringify(reading) });
   } else {
     const all = await readLocal();
     all[input.handle] = reading;
@@ -87,12 +88,7 @@ export async function saveReading(input: { handle: string; name: string; summary
 
 /** Deletes an account's saved reading. Returns false if there was none. */
 export async function deleteReading(handle: string): Promise<boolean> {
-  if (useBlob()) {
-    const { blobs } = await list({ prefix: `readings/${handle}.json` });
-    if (blobs.length === 0) return false;
-    await del(blobs.map((b) => b.url));
-    return true;
-  }
+  if (kv) return (await kv.hdel(KEYS.readings, handle)) > 0;
   const all = await readLocal();
   if (!all[handle]) return false;
   delete all[handle];
